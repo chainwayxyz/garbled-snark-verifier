@@ -1,6 +1,6 @@
-use rand::{rng, Rng};
-use crate::{bristol::parser};
 use crate::bag::*;
+use crate::bristol::parser;
+use rand::{Rng, rng};
 
 pub struct Circuit {
     pub nog: usize,
@@ -8,7 +8,7 @@ pub struct Circuit {
     pub input_sizes: Vec<usize>,
     pub output_sizes: Vec<usize>,
     pub wires: Vec<Rc<RefCell<Wire>>>,
-    pub gates: Vec<Gate>
+    pub gates: Vec<Gate>,
 }
 
 impl Circuit {
@@ -29,10 +29,10 @@ impl Circuit {
 
 #[cfg(test)]
 mod tests {
-    use std::iter::zip;
+    use super::*;
     use bitvm::bigint::U256;
     use bitvm::treepp::*;
-    use super::*;
+    use std::iter::zip;
 
     fn test_circuit(circuit_filename: &str, correct: bool) {
         println!("testing {:?}", circuit_filename);
@@ -43,12 +43,16 @@ mod tests {
 
         if !correct {
             let u: u32 = rng().random();
-            garbled_gates[(u as usize) % n] = vec![S::random(), S::random(), S::random(), S::random()];
+            garbled_gates[(u as usize) % n] =
+                vec![S::random(), S::random(), S::random(), S::random()];
         }
 
         circuit.set_input_wires();
 
-        println!("testing {:?} garble", if correct {"correct"} else {"incorrect"});
+        println!(
+            "testing {:?} garble",
+            if correct { "correct" } else { "incorrect" }
+        );
 
         for (i, (gate, garble)) in zip(circuit.gates.clone(), garbled_gates).enumerate() {
             let a = gate.wire_a.borrow().get_label();
@@ -59,8 +63,12 @@ mod tests {
             let (garble_check, c) = gate.check_garble(garble.clone(), bit_c);
             let gate_script = gate.script(garble, garble_check);
 
-            println!("testing gate[{:?}], garble is {:?}", i, if garble_check {"correct"} else {"incorrect"});
-            
+            println!(
+                "testing gate[{:?}], garble is {:?}",
+                i,
+                if garble_check { "correct" } else { "incorrect" }
+            );
+
             let script = script! {
                 { U256::push_hex(&hex::encode(&a.0)) }
                 { if bit_a {1} else {0} }
@@ -70,11 +78,10 @@ mod tests {
             };
             let result = execute_script(script);
             assert!(result.success);
-    
+
             if garble_check {
                 gate.wire_c.borrow_mut().set2(bit_c, c);
-            }
-            else {
+            } else {
                 assert!(!correct);
                 break;
             }
@@ -90,12 +97,16 @@ mod tests {
 
         if !correct {
             let u: u32 = rng().random();
-            garbled_gates[(u as usize) % n] = vec![S::random(), S::random(), S::random(), S::random()];
+            garbled_gates[(u as usize) % n] =
+                vec![S::random(), S::random(), S::random(), S::random()];
         }
 
         circuit.set_input_wires();
 
-        println!("testing {:?} garble", if correct {"correct"} else {"incorrect"});
+        println!(
+            "testing {:?} garble",
+            if correct { "correct" } else { "incorrect" }
+        );
 
         for (i, (gate, garble)) in zip(circuit.gates.clone(), garbled_gates).enumerate() {
             let a = gate.wire_a.borrow().get_label();
@@ -105,16 +116,20 @@ mod tests {
             let bit_c = (gate.f())(bit_a, bit_b);
             let (garble_check, c) = gate.check_garble(garble.clone(), bit_c);
 
-            println!("testing gate[{:?}], garble is {:?}", i, if garble_check {"correct"} else {"incorrect"});
+            println!(
+                "testing gate[{:?}], garble is {:?}",
+                i,
+                if garble_check { "correct" } else { "incorrect" }
+            );
 
             if garble_check {
                 gate.wire_c.borrow_mut().set2(bit_c, c);
                 continue;
             }
             assert!(!correct);
-        
+
             let gate_script = gate.script(garble, garble_check);
-            
+
             let script = script! {
                 { U256::push_hex(&hex::encode(&a.0)) }
                 { if bit_a {1} else {0} }
@@ -124,7 +139,7 @@ mod tests {
             };
             let result = execute_script(script);
             assert!(result.success);
-    
+
             break;
         }
     }
