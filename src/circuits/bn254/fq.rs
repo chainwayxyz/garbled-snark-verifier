@@ -429,7 +429,7 @@ mod tests {
     #[test]
     fn test_neg() {
         let a = random_fq();
-        let c = ark_bn254::Fq::from(0) - a;
+        let c = -a;
         let mut input_wires = Vec::new();
         for bit in bits_from_fq(a) {
             let wire = Rc::new(RefCell::new(Wire::new()));
