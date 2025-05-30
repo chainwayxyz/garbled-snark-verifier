@@ -1,6 +1,6 @@
 use crate::bag::*;
+use crate::{LIMB_LEN, N_LIMBS, bit_to_usize, convert_between_blake3_and_normal_form};
 use bitvm::{bigint::U256, hash::blake3::blake3_compute_script_with_limb, treepp::*};
-use crate::{bit_to_usize, convert_between_blake3_and_normal_form, LIMB_LEN, N_LIMBS};
 
 #[derive(Clone)]
 pub struct Gate {
@@ -11,7 +11,12 @@ pub struct Gate {
 }
 
 impl Gate {
-    pub fn new(wire_a: Rc<RefCell<Wire>>, wire_b: Rc<RefCell<Wire>>, wire_c: Rc<RefCell<Wire>>, name: String) -> Self {
+    pub fn new(
+        wire_a: Rc<RefCell<Wire>>,
+        wire_b: Rc<RefCell<Wire>>,
+        wire_c: Rc<RefCell<Wire>>,
+        name: String,
+    ) -> Self {
         Self {
             wire_a,
             wire_b,
@@ -22,46 +27,99 @@ impl Gate {
 
     pub fn f(&self) -> fn(bool, bool) -> bool {
         match self.name.as_str() {
-            "and"         => { fn  and(a: bool, b: bool) -> bool {a & b}     and }
-            "or"          => { fn   or(a: bool, b: bool) -> bool {a | b}      or }
-            "xor"         => { fn  xor(a: bool, b: bool) -> bool {a ^ b}     xor }
-            "nand"        => { fn nand(a: bool, b: bool) -> bool {!(a & b)} nand }
-            "inv" | "not" => { fn  not(a: bool, _b: bool) -> bool {!a}       not }
-            "xnor"        => { fn xnor(a: bool, b: bool) -> bool {!(a ^ b)} xnor }
-            _             => { panic!("this gate type is not allowed");          }
+            "and" => {
+                fn and(a: bool, b: bool) -> bool {
+                    a & b
+                }
+                and
+            }
+            "or" => {
+                fn or(a: bool, b: bool) -> bool {
+                    a | b
+                }
+                or
+            }
+            "xor" => {
+                fn xor(a: bool, b: bool) -> bool {
+                    a ^ b
+                }
+                xor
+            }
+            "nand" => {
+                fn nand(a: bool, b: bool) -> bool {
+                    !(a & b)
+                }
+                nand
+            }
+            "inv" | "not" => {
+                fn not(a: bool, _b: bool) -> bool {
+                    !a
+                }
+                not
+            }
+            "xnor" => {
+                fn xnor(a: bool, b: bool) -> bool {
+                    !(a ^ b)
+                }
+                xnor
+            }
+            "nimp" => {
+                fn nimp(a: bool, b: bool) -> bool {
+                    (a == true) && (b == false)
+                }
+                nimp
+            }
+            "nsor" => {
+                fn nsor(a: bool, b: bool) -> bool {
+                    a | (!b)
+                }
+                nsor
+            }
+            _ => {
+                panic!("this gate type is not allowed");
+            }
         }
     }
 
     pub fn evaluation_script(&self) -> Script {
         match self.name.as_str() {
-            "and"         => script! { OP_BOOLAND },
-            "or"          => script! { OP_BOOLOR },
-            "xor"         => script! { OP_NUMNOTEQUAL },
-            "nand"        => script! { OP_BOOLAND OP_NOT },
+            "and" => script! { OP_BOOLAND },
+            "or" => script! { OP_BOOLOR },
+            "xor" => script! { OP_NUMNOTEQUAL },
+            "nand" => script! { OP_BOOLAND OP_NOT },
             "inv" | "not" => script! { OP_DROP OP_NOT },
-            "xnor"        => script! { OP_NUMNOTEQUAL OP_NOT },
-            _             => panic!("this gate type is not allowed")
+            "xnor" => script! { OP_NUMNOTEQUAL OP_NOT },
+            "nimp" => script! { OP_NOT OP_BOOLAND },
+            "nsor" => script! { OP_NOT OP_BOOLOR},
+            _ => panic!("this gate type is not allowed"),
         }
     }
-    
+
     pub fn evaluate(&mut self) {
-        self.wire_c.borrow_mut().set((self.f())(self.wire_a.borrow().get_value(), self.wire_b.borrow().get_value()));
+        self.wire_c.borrow_mut().set((self.f())(
+            self.wire_a.borrow().get_value(),
+            self.wire_b.borrow().get_value(),
+        ));
     }
 
     pub fn garbled(&self) -> Vec<S> {
-        [(false, false), (true, false), (false, true), (true, true)].iter().map(|(i, j)| {
-            let k = (self.f())(*i, *j);
-            let a = self.wire_a.borrow().select(*i);
-            let b = self.wire_b.borrow().select(*j);
-            let c = self.wire_c.borrow().select(k);
-            S::hash_together(a, b) + c.neg()
-        }).collect()
+        [(false, false), (true, false), (false, true), (true, true)]
+            .iter()
+            .map(|(i, j)| {
+                let k = (self.f())(*i, *j);
+                let a = self.wire_a.borrow().select(*i);
+                let b = self.wire_b.borrow().select(*j);
+                let c = self.wire_c.borrow().select(k);
+                S::hash_together(a, b) + c.neg()
+            })
+            .collect()
     }
 
     pub fn check_garble(&self, garble: Vec<S>, bit: bool) -> (bool, S) {
         let a = self.wire_a.borrow().get_label();
         let b = self.wire_b.borrow().get_label();
-        let index = bit_to_usize(self.wire_a.borrow().get_value()) + 2 * bit_to_usize(self.wire_b.borrow().get_value());
+        let index = bit_to_usize(self.wire_a.borrow().get_value())
+            + 2 * bit_to_usize(self.wire_b.borrow().get_value());
         let row = garble[index].clone();
         let c = S::hash_together(a, b) + row.neg();
         let hc = c.hash();
@@ -153,7 +211,10 @@ mod tests {
         let incorrect_garbled = vec![S::random(), S::random(), S::random(), S::random()];
 
         for (correct, garbled) in [(true, correct_garbled), (false, incorrect_garbled)] {
-            println!("testing {:?} garble", if correct {"correct"} else {"incorrect"});
+            println!(
+                "testing {:?} garble",
+                if correct { "correct" } else { "incorrect" }
+            );
             for (bit_a, bit_b) in [(false, false), (true, false), (false, true), (true, true)] {
                 let a = gate.wire_a.borrow().select(bit_a);
                 let b = gate.wire_b.borrow().select(bit_b);
