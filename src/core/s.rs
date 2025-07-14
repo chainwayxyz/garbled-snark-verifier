@@ -1,5 +1,5 @@
 use blake3::hash;
-use rand::{Rng, rng};
+use rand::{rng, rngs::StdRng, Rng};
 use std::{iter::zip, ops::Add};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -12,8 +12,18 @@ impl S {
         Self(s)
     }
 
+    pub const fn delta() -> Self {
+        let mut s = [0_u8; 32];
+        s[10] = 31;
+        Self(s)
+    }
+
     pub fn random() -> Self {
         Self(rng().random::<[u8; 32]>())
+    }
+
+    pub fn random_rng(rng: &mut StdRng) -> Self {
+        Self(rng.random::<[u8; 32]>())
     }
 
     pub fn neg(&self) -> Self {

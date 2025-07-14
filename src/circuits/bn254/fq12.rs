@@ -4,7 +4,7 @@ use crate::{
 };
 use ark_ff::{Field, Fp12Config, UniformRand};
 use ark_std::rand::SeedableRng;
-use rand::{Rng, rng};
+use rand::{rng, rngs::StdRng, Rng};
 use rand_chacha::ChaCha20Rng;
 use std::iter::zip;
 
@@ -49,6 +49,17 @@ impl Fq12 {
             .map(|bit| {
                 let wire = new_wirex();
                 wire.borrow_mut().set(*bit);
+                wire
+            })
+            .collect()
+    }
+
+    pub fn wires_set_rng(u: ark_bn254::Fq12, rng: &mut StdRng) -> Wires {
+        Self::to_bits(u)[0..Self::N_BITS]
+            .iter()
+            .map(|bit| {
+                let wire = new_wirex();
+                wire.borrow_mut().set_rng(*bit, rng);
                 wire
             })
             .collect()
@@ -113,6 +124,59 @@ impl Fq12 {
             gate.evaluate();
         }
         (circuit.0, n)
+    }
+
+    pub fn equal(a: Wires, b: Wires) -> Circuit {
+        assert_eq!(a.len(), Self::N_BITS);
+        assert_eq!(b.len(), Self::N_BITS);
+        let mut circuit = Circuit::empty();
+
+        let a0 = a[..Fq::N_BITS].to_vec();
+        let a1 = a[Fq::N_BITS..2 * Fq::N_BITS].to_vec();
+        let a2 = a[2 * Fq::N_BITS..3 * Fq::N_BITS].to_vec();
+        let a3 = a[3 * Fq::N_BITS..4 * Fq::N_BITS].to_vec();
+        let a4 = a[4 * Fq::N_BITS..5 * Fq::N_BITS].to_vec();
+        let a5 = a[5 * Fq::N_BITS..6 * Fq::N_BITS].to_vec();
+        let a6 = a[6 * Fq::N_BITS..7 * Fq::N_BITS].to_vec();
+        let a7 = a[7 * Fq::N_BITS..8 * Fq::N_BITS].to_vec();
+        let a8 = a[8 * Fq::N_BITS..9 * Fq::N_BITS].to_vec();
+        let a9 = a[9 * Fq::N_BITS..10 * Fq::N_BITS].to_vec();
+        let a10 = a[10 * Fq::N_BITS..11 * Fq::N_BITS].to_vec();
+        let a11 = a[11 * Fq::N_BITS..12 * Fq::N_BITS].to_vec();
+        let b0 = b[..Fq::N_BITS].to_vec();
+        let b1 = b[Fq::N_BITS..2 * Fq::N_BITS].to_vec();
+        let b2 = b[2 * Fq::N_BITS..3 * Fq::N_BITS].to_vec();
+        let b3 = b[3 * Fq::N_BITS..4 * Fq::N_BITS].to_vec();
+        let b4 = b[4 * Fq::N_BITS..5 * Fq::N_BITS].to_vec();
+        let b5 = b[5 * Fq::N_BITS..6 * Fq::N_BITS].to_vec();
+        let b6 = b[6 * Fq::N_BITS..7 * Fq::N_BITS].to_vec();
+        let b7 = b[7 * Fq::N_BITS..8 * Fq::N_BITS].to_vec();
+        let b8 = b[8 * Fq::N_BITS..9 * Fq::N_BITS].to_vec();
+        let b9 = b[9 * Fq::N_BITS..10 * Fq::N_BITS].to_vec();
+        let b10 = b[10 * Fq::N_BITS..11 * Fq::N_BITS].to_vec();
+        let b11 = b[11 * Fq::N_BITS..12 * Fq::N_BITS].to_vec();
+
+        let mut results = Vec::new();
+
+        for (x, y) in zip(
+            [a0, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11],
+            [b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11],
+        ) {
+            let result = circuit.extend(Fq::equal(x, y))[0].clone();
+            results.push(result);
+        }
+
+        let mut wire = results[0].clone();
+
+        for next in results[1..].iter().cloned() {
+            let new_wire = new_wirex();
+            circuit.add(Gate::and(wire, next, new_wire.clone()));
+            wire = new_wire;
+        }
+
+        circuit.add_wire(wire);
+
+        circuit
     }
 
     pub fn add(a: Wires, b: Wires) -> Circuit {

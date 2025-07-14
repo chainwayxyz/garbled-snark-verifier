@@ -11,7 +11,7 @@ impl Circuit {
         Self(wires, gates)
     }
 
-    pub fn garbled_gates(&self) -> Vec<Vec<S>> {
+    pub fn garbled_gates(&self) -> Vec<(Option<S>, Option<S>)> {
         self.1.iter().map(|gate| gate.garbled()).collect()
     }
 
@@ -42,5 +42,18 @@ impl Circuit {
             gc.0[gate.gate_type as usize] += 1;
         }
         gc
+    }
+
+    pub fn evaluate(&self) {
+        for mut gate in self.1.clone() {
+            gate.evaluate();
+        }
+    }
+
+    pub fn garble_evaluate(&self, garbles: Vec<(Option<S>, Option<S>)>) {
+        let mut garble_iter = garbles.iter();
+        for mut gate in self.1.clone() {
+            gate.set_output_label_from_garble(*garble_iter.next().unwrap());
+        }
     }
 }

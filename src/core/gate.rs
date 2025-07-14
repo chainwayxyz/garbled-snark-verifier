@@ -139,17 +139,260 @@ impl Gate {
         ));
     }
 
-    pub fn garbled(&self) -> Vec<S> {
-        [(false, false), (true, false), (false, true), (true, true)]
-            .iter()
-            .map(|(i, j)| {
-                let k = (self.f())(*i, *j);
-                let a = self.wire_a.borrow().select(*i);
-                let b = self.wire_b.borrow().select(*j);
-                let c = self.wire_c.borrow().select(k);
-                S::hash_together(a, b) + c.neg()
-            })
-            .collect()
+    pub fn garbled(&self) -> (Option<S>, Option<S>) {
+        match self.gate_type {
+            GateType::And => {
+                let a0 = self.wire_a.borrow().label0.unwrap();
+                let a1 = self.wire_a.borrow().label1.unwrap();
+                let b0 = self.wire_b.borrow().label0.unwrap();
+                let b1 = self.wire_b.borrow().label1.unwrap();
+                let c1 = S::xor(a1, b1);
+                let c0 = S::xor(c1, S::delta());
+                self.wire_c.borrow_mut().label0 = Some(c0);
+                self.wire_c.borrow_mut().label1 = Some(c1);
+                (Some(S::xor(c0, a0.hash())), Some(S::xor(c0, b0.hash())))
+            },
+            GateType::Nand => {
+                let a0 = self.wire_a.borrow().label0.unwrap();
+                let a1 = self.wire_a.borrow().label1.unwrap();
+                let b0 = self.wire_b.borrow().label0.unwrap();
+                let b1 = self.wire_b.borrow().label1.unwrap();
+                let c0 = S::xor(a1, b1);
+                let c1 = S::xor(c0, S::delta());
+                self.wire_c.borrow_mut().label0 = Some(c0);
+                self.wire_c.borrow_mut().label1 = Some(c1);
+                (Some(S::xor(c1, a0.hash())), Some(S::xor(c1, b0.hash())))
+            },
+            GateType::Nimp => {
+                let a0 = self.wire_a.borrow().label0.unwrap();
+                let a1 = self.wire_a.borrow().label1.unwrap();
+                let b0 = self.wire_b.borrow().label0.unwrap();
+                let b1 = self.wire_b.borrow().label1.unwrap();
+                let c1 = S::xor(a1, b0);
+                let c0 = S::xor(c1, S::delta());
+                self.wire_c.borrow_mut().label0 = Some(c0);
+                self.wire_c.borrow_mut().label1 = Some(c1);
+                (Some(S::xor(c0, a0.hash())), Some(S::xor(c0, b1.hash())))
+            },
+            GateType::Imp => {
+                let a0 = self.wire_a.borrow().label0.unwrap();
+                let a1 = self.wire_a.borrow().label1.unwrap();
+                let b0 = self.wire_b.borrow().label0.unwrap();
+                let b1 = self.wire_b.borrow().label1.unwrap();
+                let c0 = S::xor(a1, b0);
+                let c1 = S::xor(c0, S::delta());
+                self.wire_c.borrow_mut().label0 = Some(c0);
+                self.wire_c.borrow_mut().label1 = Some(c1);
+                (Some(S::xor(c1, a0.hash())), Some(S::xor(c1, b1.hash())))
+            },
+            GateType::Ncimp => {
+                let a0 = self.wire_a.borrow().label0.unwrap();
+                let a1 = self.wire_a.borrow().label1.unwrap();
+                let b0 = self.wire_b.borrow().label0.unwrap();
+                let b1 = self.wire_b.borrow().label1.unwrap();
+                let c1 = S::xor(a0, b1);
+                let c0 = S::xor(c1, S::delta());
+                self.wire_c.borrow_mut().label0 = Some(c0);
+                self.wire_c.borrow_mut().label1 = Some(c1);
+                (Some(S::xor(c0, a1.hash())), Some(S::xor(c0, b0.hash())))
+            },
+            GateType::Cimp => {
+                let a0 = self.wire_a.borrow().label0.unwrap();
+                let a1 = self.wire_a.borrow().label1.unwrap();
+                let b0 = self.wire_b.borrow().label0.unwrap();
+                let b1 = self.wire_b.borrow().label1.unwrap();
+                let c0 = S::xor(a0, b1);
+                let c1 = S::xor(c0, S::delta());
+                self.wire_c.borrow_mut().label0 = Some(c0);
+                self.wire_c.borrow_mut().label1 = Some(c1);
+                (Some(S::xor(c1, a1.hash())), Some(S::xor(c1, b0.hash())))
+            },
+            GateType::Nor => {
+                let a0 = self.wire_a.borrow().label0.unwrap();
+                let a1 = self.wire_a.borrow().label1.unwrap();
+                let b0 = self.wire_b.borrow().label0.unwrap();
+                let b1 = self.wire_b.borrow().label1.unwrap();
+                let c1 = S::xor(a0, b0);
+                let c0 = S::xor(c1, S::delta());
+                self.wire_c.borrow_mut().label0 = Some(c0);
+                self.wire_c.borrow_mut().label1 = Some(c1);
+                (Some(S::xor(c0, a1.hash())), Some(S::xor(c0, b1.hash())))
+            },
+            GateType::Or => {
+                let a0 = self.wire_a.borrow().label0.unwrap();
+                let a1 = self.wire_a.borrow().label1.unwrap();
+                let b0 = self.wire_b.borrow().label0.unwrap();
+                let b1 = self.wire_b.borrow().label1.unwrap();
+                let c0 = S::xor(a0, b0);
+                let c1 = S::xor(c0, S::delta());
+                self.wire_c.borrow_mut().label0 = Some(c0);
+                self.wire_c.borrow_mut().label1 = Some(c1);
+                (Some(S::xor(c1, a1.hash())), Some(S::xor(c1, b1.hash())))
+            },
+            GateType::Xor => {
+                let a0 = self.wire_a.borrow().label0.unwrap();
+                let _a1 = self.wire_a.borrow().label1.unwrap();
+                let b0 = self.wire_b.borrow().label0.unwrap();
+                let _b1 = self.wire_b.borrow().label1.unwrap();
+                let c0 = S::xor(a0, b0);
+                let c1 = S::xor(c0, S::delta());
+                self.wire_c.borrow_mut().label0 = Some(c0);
+                self.wire_c.borrow_mut().label1 = Some(c1);
+                (None, None)
+            },
+            GateType::Xnor => {
+                let a0 = self.wire_a.borrow().label0.unwrap();
+                let _a1 = self.wire_a.borrow().label1.unwrap();
+                let b0 = self.wire_b.borrow().label0.unwrap();
+                let _b1 = self.wire_b.borrow().label1.unwrap();
+                let c1 = S::xor(a0, b0);
+                let c0 = S::xor(c1, S::delta());
+                self.wire_c.borrow_mut().label0 = Some(c0);
+                self.wire_c.borrow_mut().label1 = Some(c1);
+                (None, None)
+            },
+            GateType::Not => {
+                let a0 = self.wire_a.borrow().label0.unwrap();
+                let a1 = self.wire_a.borrow().label1.unwrap();
+                let c0 = a1;
+                let c1 = a0;
+                self.wire_c.borrow_mut().label0 = Some(c0);
+                self.wire_c.borrow_mut().label1 = Some(c1);
+                (None, None)
+            },
+        }
+    }
+
+    pub fn set_output_label_from_garble(&mut self, garble: (Option<S>, Option<S>)) {
+        let (x, y) = garble;
+        let a = self.wire_a.borrow().get_label();
+        let b = self.wire_b.borrow().get_label();
+        let u = self.wire_a.borrow().get_value();
+        let v = self.wire_b.borrow().get_value();
+        let (c, w) = match self.gate_type {
+            GateType::And => {
+                let c = if u & v {
+                    S::xor(a, b)
+                }
+                else if !u {
+                    S::xor(a.hash(), x.unwrap())
+                }
+                else {
+                    S::xor(b.hash(), y.unwrap())
+                };
+                let w = self.f()(u, v);
+                (c, w)
+            },
+            GateType::Nand => {
+                let c = if u & v {
+                    S::xor(a, b)
+                }
+                else if !u {
+                    S::xor(a.hash(), x.unwrap())
+                }
+                else {
+                    S::xor(b.hash(), y.unwrap())
+                };
+                let w = self.f()(u, v);
+                (c, w)
+            },
+            GateType::Nimp => {
+                let c = if u & !v {
+                    S::xor(a, b)
+                }
+                else if !u {
+                    S::xor(a.hash(), x.unwrap())
+                }
+                else {
+                    S::xor(b.hash(), y.unwrap())
+                };
+                let w = self.f()(u, v);
+                (c, w)
+            },
+            GateType::Imp => {
+                let c = if u & !v {
+                    S::xor(a, b)
+                }
+                else if !u {
+                    S::xor(a.hash(), x.unwrap())
+                }
+                else {
+                    S::xor(b.hash(), y.unwrap())
+                };
+                let w = self.f()(u, v);
+                (c, w)
+            },
+            GateType::Ncimp => {
+                let c = if !u & v {
+                    S::xor(a, b)
+                }
+                else if u {
+                    S::xor(a.hash(), x.unwrap())
+                }
+                else {
+                    S::xor(b.hash(), y.unwrap())
+                };
+                let w = self.f()(u, v);
+                (c, w)
+            },
+            GateType::Cimp => {
+                let c = if !u & v {
+                    S::xor(a, b)
+                }
+                else if u {
+                    S::xor(a.hash(), x.unwrap())
+                }
+                else {
+                    S::xor(b.hash(), y.unwrap())
+                };
+                let w = self.f()(u, v);
+                (c, w)
+            },
+            GateType::Nor => {
+                let c = if !u & !v {
+                    S::xor(a, b)
+                }
+                else if u {
+                    S::xor(a.hash(), x.unwrap())
+                }
+                else {
+                    S::xor(b.hash(), y.unwrap())
+                };
+                let w = self.f()(u, v);
+                (c, w)
+            },
+            GateType::Or => {
+                let c = if !u & !v {
+                    S::xor(a, b)
+                }
+                else if u {
+                    S::xor(a.hash(), x.unwrap())
+                }
+                else {
+                    S::xor(b.hash(), y.unwrap())
+                };
+                let w = self.f()(u, v);
+                (c, w)
+            },
+            GateType::Xor => {
+                let c = S::xor(a, b);
+                let w = self.f()(u, v);
+                (c, w)
+            },
+            GateType::Xnor => {
+                let c = S::xor(a, b);
+                let w = self.f()(u, v);
+                (c, w)
+            },
+            GateType::Not => {
+                let c = a; // S::xor(a, S::delta());
+                let w = !u;
+                (c, w)
+            },
+        };
+        self.wire_c.borrow_mut().label = Some(c);
+        self.wire_c.borrow_mut().value = Some(w);
+        assert_eq!(c, self.wire_c.borrow().select(w));
     }
 
     pub fn check_garble(&self, garble: Vec<S>, bit: bool) -> (bool, S) {
