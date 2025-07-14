@@ -60,6 +60,8 @@ pub trait Fp254Impl {
                 wires.push(zero_wire.clone());
             }
         }
+        wires.pop();
+        wires.pop();
         wires
     }
 
