@@ -65,6 +65,15 @@ impl Fq12 {
             .collect()
     }
 
+    pub fn wires_set_labels_rng(rng: &mut StdRng) -> Wires {
+        (0..Self::N_BITS).map(|_| {
+            let wire = new_wirex();
+            wire.borrow_mut().set_labels_rng(rng);
+            wire
+        })
+        .collect()
+    }
+
     pub fn wires_set_montgomery(u: ark_bn254::Fq12) -> Wires {
         Self::wires_set(Self::as_montgomery(u))
     }

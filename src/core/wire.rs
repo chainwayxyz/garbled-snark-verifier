@@ -51,8 +51,9 @@ impl Wire {
         self.label.unwrap()
     }
 
-    pub fn set_labels(&mut self) {
-        todo!()
+    pub fn set_labels_rng(&mut self, rng: &mut StdRng) {
+        self.label0 = Some(S::random_rng(rng));
+        self.label1 = Some(S::xor(S::delta(), self.label0.unwrap()));
     }
 
     pub fn set(&mut self, bit: bool) {
