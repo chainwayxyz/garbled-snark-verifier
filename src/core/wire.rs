@@ -58,6 +58,10 @@ impl Wire {
     pub fn set(&mut self, bit: bool) {
         assert!(self.value.is_none());
         self.value = Some(bit);
+
+        self.label0 = Some(S::random());
+        self.label1 = Some(S::xor(S::delta(), self.label0.unwrap()));
+        self.label = Some(self.select(self.value.unwrap()));
     }
 
     pub fn set_rng(&mut self, bit: bool, rng: &mut StdRng) {

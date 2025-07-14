@@ -51,6 +51,19 @@ pub trait Fp254Impl {
 
     fn two_third_modulus() -> BigUint;
 
+    fn wires_set_one_zero(zero_wire: Wirex, one_wire: Wirex, u: &BigUint) -> Wires {
+        let mut wires = Vec::new();
+        for bit in bits_from_biguint(u) {
+            if bit {
+                wires.push(one_wire.clone());
+            }else {
+                wires.push(zero_wire.clone());
+            }
+        }
+        wires
+    }
+
+
     fn multiplexer(a: Vec<Wires>, s: Wires, w: usize) -> Circuit {
         U254::multiplexer(a, s, w)
     }
@@ -189,7 +202,8 @@ pub trait Fp254Impl {
         circuit.add(Gate::not(x.clone(), not_x.clone()));
         circuit.add(Gate::and(x.clone(), not_x.clone(), shift_wire.clone()));
         */
-        shift_wire.borrow_mut().set(false);
+        //shift_wire.borrow_mut().set(false);
+        circuit.add(Gate::nimp(a[0].clone(), a[0].clone(), shift_wire.clone()));
         let mut aa = a.clone();
         let u = aa.pop().unwrap();
         let mut shifted_wires = vec![shift_wire];
@@ -366,7 +380,11 @@ pub trait Fp254Impl {
         let mut circuit = Circuit::empty();
 
         if b == ark_bn254::Fq::ZERO {
-            circuit.add_wires(Fq::wires_set(ark_bn254::Fq::ZERO));
+            let zero_wire = new_wirex();
+            circuit.add(Gate::nimp(a[0].clone(),a[0].clone() ,zero_wire.clone()));
+            for _ in 0..Self::N_BITS {
+                circuit.add_wire(zero_wire.clone());
+            }
             return circuit;
         }
 
@@ -397,7 +415,10 @@ pub trait Fp254Impl {
     fn inverse(a: Wires) -> Circuit {
         assert_eq!(a.len(), Self::N_BITS);
         let mut circuit = Circuit::empty();
-
+        let zero_wire = new_wirex();
+        let one_wire = new_wirex();
+        circuit.add(Gate::nimp(a[0].clone(), a[0].clone(), zero_wire.clone()));
+        circuit.add(Gate::imp(a[0].clone(), a[0].clone(), one_wire.clone()));
         let wires_1 = circuit.extend(U254::odd_part(a.clone()));
         let odd_part = wires_1[0..Self::N_BITS].to_vec();
         let mut even_part = wires_1[Self::N_BITS..2 * Self::N_BITS].to_vec();
@@ -406,9 +427,9 @@ pub trait Fp254Impl {
         let neg_odd_part = circuit.extend(Self::neg(odd_part.clone()));
         let mut u = circuit.extend(U254::half(neg_odd_part));
         let mut v = odd_part;
-        let mut k = Fq::wires_set(ark_bn254::Fq::ONE);
-        let mut r = Fq::wires_set(ark_bn254::Fq::ONE);
-        let mut s = Fq::wires_set(ark_bn254::Fq::from(2));
+        let mut k = Self::wires_set_one_zero(zero_wire.clone(), one_wire.clone(), &BigUint::one());
+        let mut r = Self::wires_set_one_zero(zero_wire.clone(), one_wire.clone(), &BigUint::one());
+        let mut s = Self::wires_set_one_zero(zero_wire.clone(), one_wire.clone(), &BigUint::from_str("2").unwrap());
 
         for _ in 0..2 * Self::N_BITS {
             let not_x1 = u[0].clone();
@@ -599,8 +620,10 @@ pub trait Fp254Impl {
         let mut result = Fq::wires();
         let mut r1 = new_wirex();
         let mut r2 = new_wirex();
-        r1.borrow_mut().set(false);
-        r2.borrow_mut().set(false);
+        // r1.borrow_mut().set(false);
+        // r2.borrow_mut().set(false);
+        circuit.add(Gate::nimp(a[0].clone(), a[0].clone(), r1.clone()));
+        circuit.add(Gate::nimp(a[0].clone(), a[0].clone(), r2.clone()));
         for i in 0..U254::N_BITS {
             // msb to lsb
             let j = U254::N_BITS - 1 - i;

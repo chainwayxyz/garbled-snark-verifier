@@ -5,8 +5,9 @@ use crate::{
         bn254::{fp254impl::Fp254Impl, fq::Fq, fr::Fr},
     },
 };
-use ark_ff::{AdditiveGroup, UniformRand};
+use ark_ff::{UniformRand, Zero};
 use ark_std::rand::SeedableRng;
+use num_bigint::BigUint;
 use rand::{Rng, rng};
 use rand_chacha::ChaCha20Rng;
 use std::{cmp::min, iter::zip};
@@ -105,6 +106,10 @@ impl G1Projective {
         assert_eq!(p.len(), Self::N_BITS);
         assert_eq!(q.len(), Self::N_BITS);
         let mut circuit = Circuit::empty();
+        let zero_wire = new_wirex();
+        let one_wire = new_wirex();
+        circuit.add(Gate::nimp(p[0].clone(), p[0].clone(), zero_wire.clone()));
+        circuit.add(Gate::imp(p[0].clone(), p[0].clone(), one_wire.clone()));
 
         let x1 = p[0..Fq::N_BITS].to_vec();
         let y1 = p[Fq::N_BITS..2 * Fq::N_BITS].to_vec();
@@ -139,7 +144,7 @@ impl G1Projective {
 
         let z1_0 = circuit.extend(Fq::equal_zero(z1.clone()))[0].clone();
         let z2_0 = circuit.extend(Fq::equal_zero(z2.clone()))[0].clone();
-        let zero = Fq::wires_set(ark_bn254::Fq::ZERO);
+        let zero = Fq::wires_set_one_zero(zero_wire, one_wire, &BigUint::zero());
         let s = vec![z1_0, z2_0];
         let x = circuit.extend(Fq::multiplexer(
             vec![x3, x2, x1, zero.clone()],
@@ -176,6 +181,10 @@ impl G1Projective {
     pub fn double_montgomery(p: Wires) -> Circuit {
         assert_eq!(p.len(), Self::N_BITS);
         let mut circuit = Circuit::empty();
+        let zero_wire = new_wirex();
+        let one_wire = new_wirex();
+        circuit.add(Gate::nimp(p[0].clone(), p[0].clone(), zero_wire.clone()));
+        circuit.add(Gate::imp(p[0].clone(), p[0].clone(), one_wire.clone()));
 
         let x = p[0..Fq::N_BITS].to_vec();
         let y = p[Fq::N_BITS..2 * Fq::N_BITS].to_vec();
@@ -201,7 +210,7 @@ impl G1Projective {
         let zr = circuit.extend(Fq::double(yz.clone()));
 
         let z_0 = circuit.extend(Fq::equal_zero(z));
-        let zero = Fq::wires_set(ark_bn254::Fq::ZERO);
+        let zero = Fq::wires_set_one_zero(zero_wire, one_wire, &BigUint::zero());
         let z = circuit.extend(Fq::multiplexer(vec![zr, zero], z_0, 1));
 
         circuit.add_wires(xr);
@@ -434,7 +443,7 @@ pub fn projective_to_affine_evaluate_montgomery(p: Wires) -> (Wires, GateCount) 
 mod tests {
     use super::*;
     use ark_ec::{CurveGroup, scalar_mul::variable_base::VariableBaseMSM};
-    use ark_ff::Field;
+    use ark_ff::{AdditiveGroup, Field};
     use rand::{Rng, rng};
 
     #[test]

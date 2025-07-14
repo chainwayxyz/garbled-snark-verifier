@@ -171,14 +171,19 @@ impl<const N_BITS: usize> BigIntImpl<N_BITS> {
     }
 
     pub fn self_or_zero_constant(a: &BigUint, s: Wirex) -> Circuit {
-        let mut bit_wires = vec![];
-        let mut bits = bits_from_biguint(a);
-        bits.resize(Self::N_BITS, false);
+        let mut circuit = Circuit::empty();
+        let bits = bits_from_biguint(a);
+        let zero_wire = new_wirex();
+        circuit.add(Gate::nimp(s.clone(), s.clone(), zero_wire.clone()));
         for i in 0..Self::N_BITS {
-            bit_wires.push(new_wirex());
-            bit_wires[i].borrow_mut().set(bits[i]);
+            if bits[i] {
+                circuit.add_wire(s.clone());
+
+            }else {
+                circuit.add_wire(zero_wire.clone());
+            }
         }
-        Self::self_or_zero(bit_wires, s)
+        circuit
     }
 
     pub fn multiplexer(a: Vec<Wires>, s: Wires, w: usize) -> Circuit {

@@ -122,10 +122,8 @@ impl<const N_BITS: usize> BigIntImpl<N_BITS> {
     pub fn double(a: Wires) -> Circuit {
         assert_eq!(a.len(), N_BITS);
         let mut circuit = Circuit::empty();
-        let not_a = new_wirex();
         let zero_wire = new_wirex();
-        circuit.add(Gate::not(a[0].clone(), not_a.clone()));
-        circuit.add(Gate::and(a[0].clone(), not_a.clone(), zero_wire.clone()));
+        circuit.add(Gate::nimp(a[0].clone(), a[0].clone(), zero_wire.clone()));
         circuit.add_wire(zero_wire);
         circuit.add_wires(a[0..N_BITS].to_vec());
         circuit
@@ -134,10 +132,8 @@ impl<const N_BITS: usize> BigIntImpl<N_BITS> {
     pub fn double_without_overflow(a: Wires) -> Circuit {
         assert_eq!(a.len(), N_BITS);
         let mut circuit = Circuit::empty();
-        let not_a = new_wirex();
         let zero_wire = new_wirex();
-        circuit.add(Gate::not(a[0].clone(), not_a.clone()));
-        circuit.add(Gate::and(a[0].clone(), not_a.clone(), zero_wire.clone()));
+        circuit.add(Gate::nimp(a[0].clone(), a[0].clone(), zero_wire.clone()));
         circuit.add_wire(zero_wire);
         circuit.add_wires(a[0..N_BITS - 1].to_vec());
         circuit
@@ -146,10 +142,8 @@ impl<const N_BITS: usize> BigIntImpl<N_BITS> {
     pub fn half(a: Wires) -> Circuit {
         assert_eq!(a.len(), N_BITS);
         let mut circuit = Circuit::empty();
-        let not_a = new_wirex();
         let zero_wire = new_wirex();
-        circuit.add(Gate::not(a[0].clone(), not_a.clone()));
-        circuit.add(Gate::and(a[0].clone(), not_a.clone(), zero_wire.clone()));
+        circuit.add(Gate::nimp(a[0].clone(), a[0].clone(), zero_wire.clone()));
         circuit.add_wires(a[1..N_BITS].to_vec());
         circuit.add_wire(zero_wire);
         circuit

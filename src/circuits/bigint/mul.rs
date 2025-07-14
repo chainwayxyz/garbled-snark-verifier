@@ -4,7 +4,7 @@ use crate::{
     circuits::bigint::{
         add::{add_generic, sub_generic_without_borrow},
         cmp::self_or_zero_generic,
-        utils::{bits_from_biguint, n_wires},
+        utils::bits_from_biguint,
     },
 };
 use num_bigint::BigUint;
@@ -14,12 +14,6 @@ use std::sync::Mutex;
 
 static KARATSUBA_DECISIONS: Lazy<Mutex<[Option<bool>; 256]>> =
     Lazy::new(|| Mutex::new([None; 256]));
-
-fn extend_with_false(wires: &mut Wires) {
-    let zero_wire = new_wirex();
-    zero_wire.borrow_mut().set(false);
-    wires.push(zero_wire);
-}
 
 fn set_karatsuba_decision_flag(index: usize, value: bool) {
     let mut flags = KARATSUBA_DECISIONS.lock().unwrap();
@@ -37,9 +31,12 @@ pub fn mul_generic(a_wires: &Wires, b_wires: &Wires, len: usize) -> Circuit {
 
     let mut circuit = Circuit::empty();
     for _ in 0..(len * 2) {
-        let wire = new_wirex();
-        wire.borrow_mut().set(false);
-        circuit.add_wire(wire)
+        // let wire = new_wirex();
+        // wire.borrow_mut().set(false);
+        // circuit.add_wire(wire);
+        let zero_wire = new_wirex();
+        circuit.add(Gate::nimp(a_wires[0].clone(), a_wires[0].clone(), zero_wire.clone()));
+        circuit.add_wire(zero_wire);
     } //this part can be optimized later 
 
     for (i, current_bit) in b_wires.iter().enumerate().take(len) {
@@ -74,9 +71,11 @@ pub fn mul_karatsuba_generic(a_wires: &Wires, b_wires: &Wires, len: usize) -> Ci
 
     if karatsuba_flag.is_none() || karatsuba_flag.unwrap() {
         let mut circuit = Circuit::empty();
-        circuit.0 = n_wires(len * 2);
-        for i in 0..len * 2 {
-            circuit.0[i].borrow_mut().set(false);
+        let zero_wire = new_wirex();
+        circuit.add(Gate::nimp(a_wires[0].clone(), a_wires[0].clone(), zero_wire.clone()));
+        for _ in 0..len * 2 {
+            circuit.0.push(zero_wire.clone());
+            
         }
 
         let len_0 = len / 2;
@@ -93,22 +92,24 @@ pub fn mul_karatsuba_generic(a_wires: &Wires, b_wires: &Wires, len: usize) -> Ci
         let mut extended_sq_0 = sq_0.clone();
         let mut extended_a_0 = a_0.clone();
         let mut extended_b_0 = b_0.clone();
+        let zero_wire = new_wirex();
+        circuit.add(Gate::nimp(a_wires[0].clone(), a_wires[0].clone(), zero_wire.clone()));
         if len_0 < len_1 {
-            extend_with_false(&mut extended_a_0);
-            extend_with_false(&mut extended_b_0);
-            extend_with_false(&mut extended_sq_0);
-            extend_with_false(&mut extended_sq_0);
-            //extended_a_0.push(zero_wire.clone());
-            //extended_b_0.push(zero_wire.clone());
-            //extended_sq_0.push(zero_wire.clone());
-            //extended_sq_0.push(zero_wire.clone());
+            // extend_with_false(&mut extended_a_0);
+            // extend_with_false(&mut extended_b_0);
+            // extend_with_false(&mut extended_sq_0);
+            // extend_with_false(&mut extended_sq_0);
+            extended_a_0.push(zero_wire.clone());
+            extended_b_0.push(zero_wire.clone());
+            extended_sq_0.push(zero_wire.clone());
+            extended_sq_0.push(zero_wire.clone());
         }
 
         let sum_a = circuit.extend(add_generic(extended_a_0, a_1, len_1));
         let sum_b = circuit.extend(add_generic(extended_b_0, b_1, len_1));
         let mut sq_sum = circuit.extend(add_generic(extended_sq_0, sq_1.clone(), len_1 * 2));
-        extend_with_false(&mut sq_sum);
-        //sq_sum.push(zero_wire.clone());
+        // extend_with_false(&mut sq_sum);
+        sq_sum.push(zero_wire.clone());
 
         let sum_mul = circuit.extend(mul_karatsuba_generic(&sum_a, &sum_b, len_1 + 1));
         let cross_term =
@@ -158,11 +159,11 @@ impl<const N_BITS: usize> BigIntImpl<N_BITS> {
         c_bits.truncate(N_BITS);
 
         let mut circuit = Circuit::empty();
+        let zero_wire = new_wirex();
+        circuit.add(Gate::nimp(a_wires[0].clone(), a_wires[0].clone(), zero_wire.clone()));
 
         for _ in 0..(N_BITS * 2) {
-            let wire = new_wirex();
-            wire.borrow_mut().set(false);
-            circuit.add_wire(wire)
+            circuit.add_wire(zero_wire.clone());
         } //this part can be optimized later 
 
         for (i, bit) in c_bits.iter().enumerate() {
@@ -209,11 +210,13 @@ impl<const N_BITS: usize> BigIntImpl<N_BITS> {
         c_bits.truncate(N_BITS);
 
         let mut circuit = Circuit::empty();
-
+        let zero_wire = new_wirex();
+        circuit.add(Gate::nimp(a_wires[0].clone(), a_wires[0].clone(), zero_wire.clone()));
         for _ in 0..power {
-            let wire = new_wirex();
-            wire.borrow_mut().set(false);
-            circuit.add_wire(wire)
+            // let wire = new_wirex();
+            // wire.borrow_mut().set(false);
+            // circuit.add_wire(wire)
+            circuit.add_wire(zero_wire.clone());
         } //this part can be optimized later 
 
         for (i, bit) in c_bits.iter().enumerate() {

@@ -1,7 +1,7 @@
 use std::time::Instant;
 use garbled_snark_verifier::{bag::{Circuit, Wires}, circuits::bn254::fq12::Fq12};
 use rand::{rngs::StdRng, SeedableRng};
-// use blake3::hash;
+use blake3::hash;
 
 pub fn fq12_mul_equal(a: Wires, b: Wires, c: Wires) -> Circuit {
     let mut circuit = Circuit::empty();
@@ -33,6 +33,16 @@ pub fn main() {
     let start = Instant::now();
     let garbles = circuit.garbled_gates();
     println!("garble len: {:?}", garbles.len());
+    let mut v = Vec::new();
+    for (x, y) in garbles.clone() {
+        if x.is_some() {
+            v.extend(x.unwrap().0);
+            v.extend(y.unwrap().0);
+        }
+    }
+    let temp = hash(&v);
+    let garble_hash = temp.as_bytes();
+    println!("garble_hash: {:?}", garble_hash);
     println!("circuit garbling: {:?}", start.elapsed());
 
     let start = Instant::now();
