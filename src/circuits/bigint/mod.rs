@@ -29,3 +29,4 @@ impl<const N_BITS: usize> BigIntImpl<N_BITS> {
 }
 
 pub type U254 = BigIntImpl<254>;
+pub type U32 = BigIntImpl<32>;
