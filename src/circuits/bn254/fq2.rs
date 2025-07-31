@@ -678,7 +678,7 @@ mod tests {
     }
 
     #[test]
-    fn test_fq2_mul_by_nonresiude() {
+    fn test_fq2_mul_by_nonresidue() {
         let a = Fq2::random();
         let circuit = Fq2::mul_by_nonresidue(Fq2::wires_set(a));
         circuit.gate_counts().print();
