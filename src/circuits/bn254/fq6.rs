@@ -710,9 +710,9 @@ mod tests {
             gate.evaluate();
         }
         let c = Fq6::from_wires(circuit.0);
-        let mut a_nonresiude = a;
-        ark_bn254::Fq12Config::mul_fp6_by_nonresidue_in_place(&mut a_nonresiude);
-        assert_eq!(c, a_nonresiude);
+        let mut a_nonresidue = a;
+        ark_bn254::Fq12Config::mul_fp6_by_nonresidue_in_place(&mut a_nonresidue);
+        assert_eq!(c, a_nonresidue);
     }
 
     #[test]
