@@ -3,9 +3,9 @@ use garbled_snark_verifier::{bag::{Circuit, Wires, S}, circuits::bn254::fq12::Fq
 use rand::{rng, rngs::StdRng, seq::IteratorRandom, Rng, SeedableRng};
 use blake3::hash;
 
-pub fn fq12_mul_equal(a: Wires, b: Wires, c: Wires) -> Circuit {
+pub fn custom_circuit(a: Wires, b: Wires, c: Wires) -> Circuit {
     let mut circuit = Circuit::empty();
-    let d = circuit.extend(Fq12::mul_montgomery(a, b));
+    let d = circuit.extend(Fq12::mul_montgomery(a.clone(), b.clone()));
     let equality = circuit.extend(Fq12::equal(c, d));
     circuit.add_wire(equality[0].clone());
     circuit
@@ -21,7 +21,7 @@ pub fn garbler1<const N: usize, const M: usize>() -> ([[u8; 32]; N], ([u64; N], 
         let a_wires = Fq12::wires_set_labels_rng(&mut r);
         let b_wires = Fq12::wires_set_labels_rng(&mut r);
         let c_wires = Fq12::wires_set_labels_rng(&mut r);
-        let circuit = fq12_mul_equal(a_wires, b_wires, c_wires);
+        let circuit = custom_circuit(a_wires, b_wires, c_wires);
         let garble = circuit.garbled_gates();
         let mut v = Vec::new();
         for (x, y) in garble.clone() {
@@ -79,7 +79,7 @@ pub fn evaluator2<const N: usize, const M: usize, const N_MINUS_M: usize>(commit
             let a_wires = Fq12::wires_set_labels_rng(&mut r);
             let b_wires = Fq12::wires_set_labels_rng(&mut r);
             let c_wires = Fq12::wires_set_labels_rng(&mut r);
-            let circuit = fq12_mul_equal(a_wires, b_wires, c_wires);
+            let circuit = custom_circuit(a_wires, b_wires, c_wires);
             let garble = circuit.garbled_gates();
             let mut v = Vec::new();
             for (x, y) in garble.clone() {
@@ -141,7 +141,7 @@ pub fn evaluator() {
     evaluator2::<N, M, N_MINUS_M>(commitments, selected, opened_seeds);
 }
 
-pub fn main() {
+pub fn test() {
     let mut r = StdRng::seed_from_u64(31);
     
     let start = Instant::now();
@@ -150,7 +150,7 @@ pub fn main() {
     let a_wires = Fq12::wires_set_rng(Fq12::as_montgomery(a), &mut r);
     let b_wires = Fq12::wires_set_rng(Fq12::as_montgomery(b), &mut r);
     let c_wires = Fq12::wires_set_rng(Fq12::as_montgomery(a * b), &mut r);
-    let circuit = fq12_mul_equal(a_wires, b_wires, c_wires);
+    let circuit = custom_circuit(a_wires, b_wires, c_wires);
     circuit.gate_counts().print();
     println!("circuit generation: {:?}", start.elapsed());
 
@@ -162,7 +162,7 @@ pub fn main() {
 
     let start = Instant::now();
     let garbles = circuit.garbled_gates();
-    println!("garble len: {:?}", garbles.len());
+
     let mut v = Vec::new();
     for (x, y) in garbles.clone() {
         if x.is_some() {
@@ -170,6 +170,7 @@ pub fn main() {
             v.extend(y.unwrap().0);
         }
     }
+
     let temp = hash(&v);
     let garble_hash = temp.as_bytes();
     println!("garble_hash: {:?}", garble_hash);
@@ -180,4 +181,8 @@ pub fn main() {
     assert_eq!(circuit.0[0].borrow().get_label(), circuit.0[0].borrow().select(true));
     println!("circuit garbling evaluation: {:?}", start.elapsed());
     println!("final label: {:?}", circuit.0[0].borrow().get_label());
+}
+
+pub fn main() {
+    test();
 }
