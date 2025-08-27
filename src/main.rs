@@ -14,6 +14,14 @@ pub fn custom_circuit(a: Wires, b: Wires, c: Wires) -> Circuit {
 pub fn gc_commitment(circuit: &Circuit) -> [u8; 32] {
     let garble = circuit.garbled_gates();
     let mut v = Vec::new();
+
+    for input in circuit.0.clone() {
+        for i in 0..31{
+            v.push(input.borrow().label0.unwrap().0[i]);
+            v.push(input.borrow().label1.unwrap().0[i]);
+        }
+    }
+
     for (x, y) in garble.clone() {
         if x.is_some() {
             v.extend(x.unwrap().0);
