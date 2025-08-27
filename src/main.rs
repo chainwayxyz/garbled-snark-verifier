@@ -11,6 +11,21 @@ pub fn custom_circuit(a: Wires, b: Wires, c: Wires) -> Circuit {
     circuit
 }
 
+pub fn gc_commitment(circuit: &Circuit) -> [u8; 32] {
+    let garble = circuit.garbled_gates();
+    let mut v = Vec::new();
+    for (x, y) in garble.clone() {
+        if x.is_some() {
+            v.extend(x.unwrap().0);
+            v.extend(y.unwrap().0);
+        }
+    }
+    let temp = hash(&v);
+    let garble_hash = temp.as_bytes();
+
+    *garble_hash
+}
+ 
 pub fn garbler1<const N: usize, const M: usize>() -> ([[u8; 32]; N], ([u64; N], [Vec<(Option<S>, Option<S>)>; N])) {
     let mut commitments = [[0; 32]; N];
     let mut seeds = [0; N];
@@ -23,17 +38,7 @@ pub fn garbler1<const N: usize, const M: usize>() -> ([[u8; 32]; N], ([u64; N], 
         let c_wires = Fq12::wires_set_labels_rng(&mut r);
         let circuit = custom_circuit(a_wires, b_wires, c_wires);
         let garble = circuit.garbled_gates();
-        let mut v = Vec::new();
-        for (x, y) in garble.clone() {
-            if x.is_some() {
-                v.extend(x.unwrap().0);
-                v.extend(y.unwrap().0);
-            }
-        }
-        let temp = hash(&v);
-        let garble_hash = temp.as_bytes();
-
-        commitments[i] = garble_hash.clone();
+        commitments[i] = gc_commitment(&circuit);
         seeds[i] = seed;
         garbles[i] = garble;
     }
@@ -80,17 +85,8 @@ pub fn evaluator2<const N: usize, const M: usize, const N_MINUS_M: usize>(commit
             let b_wires = Fq12::wires_set_labels_rng(&mut r);
             let c_wires = Fq12::wires_set_labels_rng(&mut r);
             let circuit = custom_circuit(a_wires, b_wires, c_wires);
-            let garble = circuit.garbled_gates();
-            let mut v = Vec::new();
-            for (x, y) in garble.clone() {
-                if x.is_some() {
-                    v.extend(x.unwrap().0);
-                    v.extend(y.unwrap().0);
-                }
-            }
-            let temp = hash(&v);
-            let garble_hash = temp.as_bytes();
-            assert_eq!(*garble_hash, commitment);
+            let garble_hash = gc_commitment(&circuit);
+            assert_eq!(garble_hash, commitment);
             seed_index += 1;
         }
     }
@@ -161,23 +157,13 @@ pub fn test() {
     println!("circuit evaluation: {:?}", start.elapsed());
 
     let start = Instant::now();
-    let garbles = circuit.garbled_gates();
-
-    let mut v = Vec::new();
-    for (x, y) in garbles.clone() {
-        if x.is_some() {
-            v.extend(x.unwrap().0);
-            v.extend(y.unwrap().0);
-        }
-    }
-
-    let temp = hash(&v);
-    let garble_hash = temp.as_bytes();
+    let garble = circuit.garbled_gates();
+    let garble_hash = gc_commitment(&circuit);
     println!("garble_hash: {:?}", garble_hash);
     println!("circuit garbling: {:?}", start.elapsed());
 
     let start = Instant::now();
-    circuit.garble_evaluate(garbles);
+    circuit.garble_evaluate(garble);
     assert_eq!(circuit.0[0].borrow().get_label(), circuit.0[0].borrow().select(true));
     println!("circuit garbling evaluation: {:?}", start.elapsed());
     println!("final label: {:?}", circuit.0[0].borrow().get_label());
