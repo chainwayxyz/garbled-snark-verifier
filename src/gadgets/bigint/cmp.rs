@@ -4,6 +4,7 @@ use num_bigint::BigUint;
 use super::BigIntWires;
 use crate::{
     CircuitContext, Gate, WireId,
+    circuit::streaming::TRUE_WIRE,
     gadgets::{basic, bigint::bits_from_biguint_with_len},
 };
 
@@ -89,12 +90,8 @@ pub fn equal_zero<C: CircuitContext>(circuit: &mut C, a: &BigIntWires) -> WireId
     if a.len() == 1 {
         let is_bit_zero = circuit.issue_wire();
 
-        // Can't use `Gate::not` to input argument
-        circuit.add_gate(Gate::nand(
-            a.get(0).unwrap(),
-            a.get(0).unwrap(),
-            is_bit_zero,
-        ));
+        //this xor can be negated with innate NOT maintainence
+        circuit.add_gate(Gate::xor(a.get(0).unwrap(), TRUE_WIRE, is_bit_zero));
 
         return is_bit_zero;
     }
@@ -121,14 +118,14 @@ pub fn greater_than<C: CircuitContext>(
             .iter()
             .map(|b_i| {
                 let w = circuit.issue_wire();
-                // Can't use `Gate::not` to input argument
-                circuit.add_gate(Gate::nand(*b_i, *b_i, w));
+                //this xor can be negated with innate NOT maintainence
+                circuit.add_gate(Gate::xor(*b_i, TRUE_WIRE, w));
                 w
             })
             .collect(),
     };
 
-    let sum = super::add_generic(circuit, a, &not_b);
+    let sum = super::add(circuit, a, &not_b);
     sum.last().unwrap()
 }
 
@@ -143,8 +140,8 @@ pub fn less_than_constant<C: CircuitContext>(
             .iter()
             .map(|a_i| {
                 let w = circuit.issue_wire();
-                // Can't use `Gate::not` to input argument
-                circuit.add_gate(Gate::nand(*a_i, *a_i, w));
+                //this xor can be negated with innate NOT maintainence
+                circuit.add_gate(Gate::xor(*a_i, TRUE_WIRE, w));
                 w
             })
             .collect(),
