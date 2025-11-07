@@ -1,7 +1,8 @@
-use std::{cmp::min, collections::HashMap, iter::zip};
+use std::{cmp::min, collections::HashMap, iter::zip, str::FromStr};
 
-use ark_ff::Zero;
+use ark_ff::{AdditiveGroup, Field, Zero};
 use circuit_component_macro::component;
+use num_bigint::BigUint;
 
 use crate::{
     CircuitContext, WireId,
@@ -11,6 +12,19 @@ use crate::{
         bn254::{fp254impl::Fp254Impl, fq::Fq, fq2::Fq2, fr::Fr},
     },
 };
+
+fn scalar_pieces(window: usize, scalar: u64) -> Vec<u64> {
+    let mut a = scalar;
+    let c = (1 << window) - 1;
+    let mut pieces = Vec::new();
+
+    while a != 0 {
+        pieces.push(a & c);
+        a >>= window;
+    }
+    pieces.reverse();
+    pieces
+}
 
 #[derive(Clone, Debug)]
 pub struct G2Projective {
@@ -496,6 +510,38 @@ impl G2Projective {
         acc
     }
 
+    // #[component(offcircuit_args = "s")]
+    pub fn scalar_mul_by_constant_scalar_montgomery<C: CircuitContext, const W: usize>(
+        circuit: &mut C,
+        s: &u64,
+        base: &G2Projective,
+    ) -> G2Projective {
+        let n = 2_usize.pow(W as u32);
+
+        let mut bases = Vec::new();
+        let mut p = G2Projective::new_constant(&G2Projective::as_montgomery(ark_bn254::G2Projective::default())).unwrap();
+
+        for _ in 0..n {
+            bases.push(p.clone());
+            p = G2Projective::add_montgomery(circuit, &p, &base);
+        }
+
+        let pieces = scalar_pieces(W, *s);
+
+        println!("pieces: {:?}", pieces);
+
+        let mut acc = G2Projective::new_constant(&G2Projective::as_montgomery(ark_bn254::G2Projective::default())).unwrap();
+
+        for piece in pieces {
+            for _ in 0..W {
+                acc = G2Projective::double_montgomery(circuit, &acc);
+            }
+            acc = G2Projective::add_montgomery(circuit, &acc, &bases[piece as usize]);
+        }
+
+        acc
+    }
+
     pub fn msm_with_constant_bases_montgomery<const W: usize, C: CircuitContext>(
         circuit: &mut C,
         scalars: &Vec<Fr>,
@@ -523,6 +569,60 @@ impl G2Projective {
             y: Fq2::neg(circuit, p.y.clone()),
             z: p.z.clone(),
         }
+    }
+
+    #[component]
+    pub fn mul_by_char<C: CircuitContext>(circuit: &mut C, p: &G2Projective) -> G2Projective {
+        let beta_12x = BigUint::from_str(
+            "21575463638280843010398324269430826099269044274347216827212613867836435027261",
+        )
+        .unwrap();
+        let beta_12y = BigUint::from_str(
+            "10307601595873709700152284273816112264069230130616436755625194854815875713954",
+        )
+        .unwrap();
+        let beta_12 = ark_bn254::Fq2::from_base_prime_field_elems([
+            ark_bn254::Fq::from(beta_12x.clone()),
+            ark_bn254::Fq::from(beta_12y.clone()),
+        ])
+        .unwrap();
+        let beta_13x = BigUint::from_str(
+            "2821565182194536844548159561693502659359617185244120367078079554186484126554",
+        )
+        .unwrap();
+        let beta_13y = BigUint::from_str(
+            "3505843767911556378687030309984248845540243509899259641013678093033130930403",
+        )
+        .unwrap();
+        let beta_13 = ark_bn254::Fq2::from_base_prime_field_elems([
+            ark_bn254::Fq::from(beta_13x.clone()),
+            ark_bn254::Fq::from(beta_13y.clone()),
+        ])
+        .unwrap();
+        let y_conjugate = Fq2::conjugate(circuit, &p.y);
+        let new_y = Fq2::mul_by_constant_montgomery(circuit, &y_conjugate, &beta_13);
+        let x_conjugate =  Fq2::conjugate(circuit, &p.x);
+        let new_x = Fq2::mul_by_constant_montgomery(circuit, &x_conjugate, &beta_12);
+        let new_p = G2Projective { x: new_x, y: new_y, z: p.z.clone()};
+        new_p
+    }
+
+    // #[component]
+    pub fn is_r_torsion<C: CircuitContext>(circuit: &mut C, p: &G2Projective) -> WireId {
+        let x = 4965661367192848881;
+        let a = G2Projective::scalar_mul_by_constant_scalar_montgomery::<_, 2>(circuit, &x, p);
+        let b = G2Projective::add_montgomery(circuit, &a, p);
+        // ψ([x₀]P) + ψ²([x₀]P) - ψ³([2x₀]P)
+        let c = G2Projective::mul_by_char(circuit, &a);
+        let d = G2Projective::mul_by_char(circuit, &c);
+        let e = G2Projective::mul_by_char(circuit, &d);
+        let f = G2Projective::double_montgomery(circuit, &e);
+        let g = G2Projective::neg(circuit, &f);
+        let h = G2Projective::add_montgomery(circuit, &c, &d);
+        let i = G2Projective::add_montgomery(circuit, &h, &g);
+        let j = G2Projective::add_montgomery(circuit, &i, &b);
+        let result = Fq2::equal_constant(circuit, &j.z, &ark_bn254::Fq2::ZERO);
+        result
     }
 }
 
@@ -815,6 +915,30 @@ mod tests {
     }
 
     #[test]
+    fn test_g2p_scalar_mul_with_constant_scalar_montgomery() {
+        let x = 4965661367192848881;
+        let s = x;
+        let p = rnd_g2(&mut trng());
+        let result = p * ark_bn254::Fr::from(s);
+
+        let p_mont = G2Projective::as_montgomery(p);
+
+        let inputs = G2Input { points: [p_mont] };
+        let circuit_result: crate::circuit::StreamingResult<_, _, Vec<bool>> =
+            CircuitBuilder::streaming_execute(inputs, 10_000, |root, inputs_wire| {
+                let result_wires = G2Projective::scalar_mul_by_constant_scalar_montgomery::<_, 2>(
+                    root,
+                    &s,
+                    &inputs_wire.points[0],
+                );
+                result_wires.to_wires_vec()
+            });
+
+        let actual_result = G2Projective::from_bits_unchecked(circuit_result.output_value.clone());
+        assert_eq!(actual_result, G2Projective::as_montgomery(result));
+    }
+
+    #[test]
     fn test_msm_with_constant_bases_montgomery() {
         let n = 1;
         let scalars = (0..n).map(|_| rnd_fr(&mut trng())).collect::<Vec<_>>();
@@ -872,5 +996,24 @@ mod tests {
 
         let actual_result = G2Projective::from_bits_unchecked(circuit_result.output_value.clone());
         assert_eq!(actual_result, G2Projective::as_montgomery(result));
+    }
+
+    #[test]
+    fn test_g2p_is_r_torsion() {
+        let p = rnd_g2(&mut trng());
+
+        let p_mont = G2Projective::as_montgomery(p);
+
+        let inputs = G2Input { points: [p_mont] };
+        let circuit_result: crate::circuit::StreamingResult<_, _, Vec<bool>> =
+            CircuitBuilder::streaming_execute(inputs, 10_000, |root, inputs_wire| {
+                let result_wires = G2Projective::is_r_torsion(
+                    root,
+                    &inputs_wire.points[0],
+                );
+                result_wires.to_wires_vec()
+            });
+
+        assert!(circuit_result.output_value[0].clone());
     }
 }
