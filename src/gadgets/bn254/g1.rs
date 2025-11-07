@@ -6,7 +6,10 @@ use circuit_component_macro::component;
 use crate::{
     CircuitContext, WireId,
     circuit::{FromWires, WiresObject},
-    gadgets::{bigint, bn254::{fp254impl::Fp254Impl, fq::Fq, fr::Fr}},
+    gadgets::{
+        bigint,
+        bn254::{fp254impl::Fp254Impl, fq::Fq, fr::Fr},
+    },
 };
 
 #[derive(Clone, Debug)]
@@ -862,7 +865,7 @@ mod tests {
 
     #[test]
     fn test_g1p_is_on_curve() {
-        // Generate random G1 points, a is on curve, b isnt
+        // Generate random G1 points, a is on curve, b isn't
         let a = rnd();
         let b = ark_bn254::G1Projective {
             x: Fq::random(&mut trng()),

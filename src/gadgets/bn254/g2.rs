@@ -519,7 +519,10 @@ impl G2Projective {
         let n = 2_usize.pow(W as u32);
 
         let mut bases = Vec::new();
-        let mut p = G2Projective::new_constant(&G2Projective::as_montgomery(ark_bn254::G2Projective::default())).unwrap();
+        let mut p = G2Projective::new_constant(&G2Projective::as_montgomery(
+            ark_bn254::G2Projective::default(),
+        ))
+        .unwrap();
 
         for _ in 0..n {
             bases.push(p.clone());
@@ -530,7 +533,10 @@ impl G2Projective {
 
         println!("pieces: {:?}", pieces);
 
-        let mut acc = G2Projective::new_constant(&G2Projective::as_montgomery(ark_bn254::G2Projective::default())).unwrap();
+        let mut acc = G2Projective::new_constant(&G2Projective::as_montgomery(
+            ark_bn254::G2Projective::default(),
+        ))
+        .unwrap();
 
         for piece in pieces {
             for _ in 0..W {
@@ -601,9 +607,13 @@ impl G2Projective {
         .unwrap();
         let y_conjugate = Fq2::conjugate(circuit, &p.y);
         let new_y = Fq2::mul_by_constant_montgomery(circuit, &y_conjugate, &beta_13);
-        let x_conjugate =  Fq2::conjugate(circuit, &p.x);
+        let x_conjugate = Fq2::conjugate(circuit, &p.x);
         let new_x = Fq2::mul_by_constant_montgomery(circuit, &x_conjugate, &beta_12);
-        let new_p = G2Projective { x: new_x, y: new_y, z: p.z.clone()};
+        let new_p = G2Projective {
+            x: new_x,
+            y: new_y,
+            z: p.z.clone(),
+        };
         new_p
     }
 
@@ -1007,10 +1017,7 @@ mod tests {
         let inputs = G2Input { points: [p_mont] };
         let circuit_result: crate::circuit::StreamingResult<_, _, Vec<bool>> =
             CircuitBuilder::streaming_execute(inputs, 10_000, |root, inputs_wire| {
-                let result_wires = G2Projective::is_r_torsion(
-                    root,
-                    &inputs_wire.points[0],
-                );
+                let result_wires = G2Projective::is_r_torsion(root, &inputs_wire.points[0]);
                 result_wires.to_wires_vec()
             });
 
