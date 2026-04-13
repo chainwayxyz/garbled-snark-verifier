@@ -1,4 +1,4 @@
-use std::{path::PathBuf, time::Instant};
+use std::{path::PathBuf, sync::OnceLock, time::Instant};
 
 use bincode::config;
 use sp1_core_executor::SP1ContextBuilder;
@@ -31,7 +31,26 @@ pub trait SolderInput: CircuitInput {
 
 /// Returns the compiled soldering guest ELF bytes.
 pub fn elf() -> &'static [u8] {
-    include_bytes!(env!("SP1_ELF_sp1-soldering-guest"))
+    static ELF_BYTES: OnceLock<Vec<u8>> = OnceLock::new();
+    ELF_BYTES.get_or_init(load_elf_bytes).as_slice()
+}
+
+fn load_elf_bytes() -> Vec<u8> {
+    let path = std::env::var("SP1_ELF_sp1-soldering-guest")
+        .or_else(|_| std::env::var("SP1_SOLDERING_ELF_PATH"))
+        .unwrap_or_else(|_| {
+            format!(
+                "{}/sp1-soldering-program/elf/riscv32im-succinct-zkvm-elf",
+                env!("CARGO_MANIFEST_DIR")
+            )
+        });
+
+    std::fs::read(&path).unwrap_or_else(|err| {
+        panic!(
+            "failed to load SP1 soldering ELF from '{path}': {err}. \
+set SP1_ELF_sp1-soldering-guest or SP1_SOLDERING_ELF_PATH to a valid guest ELF path"
+        )
+    })
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
