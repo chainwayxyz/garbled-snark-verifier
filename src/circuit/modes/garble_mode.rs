@@ -80,6 +80,10 @@ impl<H: hashers::GateHasher, CTH: CiphertextHandler> GarbleMode<H, CTH> {
     /// Create a new GarbleMode. The gate hasher is derived from the RNG seeded by `seed`.
     pub fn new(capacity: usize, seed: u64, output_handler: CTH) -> Self {
         let mut rng = ChaChaRng::seed_from_u64(seed);
+        Self::new_from_rng(capacity, rng, output_handler)
+    }
+
+    pub fn new_from_rng(capacity: usize, mut rng: ChaChaRng, output_handler: CTH) -> Self {
         let gate_hasher = H::from_rng(&mut rng);
         let delta = Delta::generate(&mut rng);
 
@@ -97,6 +101,7 @@ impl<H: hashers::GateHasher, CTH: CiphertextHandler> GarbleMode<H, CTH> {
             gate_hasher,
         }
     }
+        
 
     /// Get the hasher seed for inclusion in commitment
     pub fn gate_hasher_seed(&self) -> &H::Seed {
