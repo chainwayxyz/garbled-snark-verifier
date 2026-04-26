@@ -245,6 +245,15 @@ mod tests {
                     }
                 )*
             }
+            mod sha256 {
+                use super::*;
+                $(
+                    #[test]
+                    fn $test_name() {
+                        garble_consistency::<crate::Sha256Hasher>(GateType::$gate_type);
+                    }
+                )*
+            }
         };
     }
 

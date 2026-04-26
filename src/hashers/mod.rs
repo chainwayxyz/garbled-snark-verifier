@@ -13,6 +13,7 @@ use crate::{S, core::s::S_SIZE};
 pub enum HasherKind {
     Blake3,
     Aes,
+    Sha256,
 }
 
 pub mod aes_ni;
@@ -78,6 +79,48 @@ impl HashWithGate<1> for Blake3Hasher {
 }
 
 impl GateHasher for Blake3Hasher {
+    type Seed = ();
+
+    fn from_rng<R: Rng>(_rng: &mut R) -> Self {
+        Self
+    }
+
+    fn from_seed(_seed: Self::Seed) -> Self {
+        Self
+    }
+
+    fn seed(&self) -> &Self::Seed {
+        &()
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct Sha256Hasher;
+
+impl HashWithGate<2> for Sha256Hasher {
+    fn hash_with_gate(&self, labels: &[S; 2], gate_id: usize) -> [S; 2] {
+        let [selected_label, other_label] = labels;
+
+        let [h_selected] = self.hash_with_gate(&[*selected_label], gate_id);
+        let [h_other] = self.hash_with_gate(&[*other_label], gate_id);
+
+        [h_selected, h_other]
+    }
+}
+
+impl HashWithGate<1> for Sha256Hasher {
+    fn hash_with_gate(&self, labels: &[S; 1], gate_id: usize) -> [S; 1] {
+        use sha2::Digest;
+        let mut hasher = sha2::Sha256::new();
+        hasher.update(labels[0].to_bytes());
+        hasher.update(gate_id.to_le_bytes());
+        let result = hasher.finalize();
+
+        [S::from_bytes(result[0..S_SIZE].try_into().unwrap())]
+    }
+}
+
+impl GateHasher for Sha256Hasher {
     type Seed = ();
 
     fn from_rng<R: Rng>(_rng: &mut R) -> Self {
