@@ -17,7 +17,10 @@ description = "Garbled-circuit SNARK verifier using Groth16 (BN254), with reusab
 resolver = "2"
 
 [features]
-default = ["tracing_max_level", "tracing_scopes", "vsss", "test-utils"]
+default = ["tracing_max_level", "tracing_scopes", "vsss", "test-utils", "parallel", "streaming", "std"]
+std = ["tracing/std", "bitvec/std", "tracing-subscriber"]
+parallel = ["rayon", "num_cpus"]
+streaming = ["crossbeam"]
 sp1-soldering = ["sp1-prover", "sp1-core-machine", "sp1-core-executor", "sp1-primitives", "sp1-stark", "dirs", "bincode"]
 test-utils = []
 vsss = ["ark-secp256k1"]
@@ -27,35 +30,35 @@ tracing_scopes = []
 
 [dependencies]
 aes = "0.8"
-ark-bn254 = "0.5.0"
-ark-crypto-primitives = "0.5.0"
-ark-ec = "0.5.0"
-ark-ff = "0.5.0"
-ark-groth16 = "0.5.0"
-ark-relations = "0.5.1"
-ark-secp256k1 = { version = "0.5.0", optional = true }
-ark-serialize = "0.5.0"
-ark-snark = "0.5.1"
-ark-std = "0.5.0"
-bitvec = "1.0.1"
+ark-bn254 = { version = "0.5.0", default-features = false, features = ["curve", "r1cs"] }
+ark-crypto-primitives = { version = "0.5.0", default-features = false }
+ark-ec = { version = "0.5.0", default-features = false }
+ark-ff = { version = "0.5.0", default-features = false }
+ark-groth16 = { version = "0.5.0", default-features = false }
+ark-relations = { version = "0.5.1", default-features = false }
+ark-secp256k1 = { version = "0.5.0", optional = true, default-features = false }
+ark-serialize = { version = "0.5.0", default-features = false }
+ark-snark = { version = "0.5.1", default-features = false }
+ark-std = { version = "0.5.0", default-features = false }
+bitvec = { version = "1.0.1", default-features = false, features = ["alloc"] }
 blake3 = { version = "1.6.1", features = ["traits-preview"] }
 circuit_component_macro = { path = "circuit_component_macro" }
-crossbeam = "0.8"
+crossbeam = { version = "0.8", optional = true }
 digest = "0.10"
 itertools = "0.14.0"
 num-bigint = { version = "0.4", features = ["rand"] }
 num-traits = "0.2"
-num_cpus = "1.16"
+num_cpus = { version = "1.16", optional = true }
 rand = "0.8" # using old version for consistency with ark
 rand_chacha = "0.3" # using old version for consistency with ark
-rayon = "1.10.0"
+rayon = { version = "1.10.0", optional = true }
 serde = { version = "1.0.225", features = ["derive"] }
 serde_json = "1.0"
 slab = "0.4.11"
 thiserror = "2.0.12"
-tracing = { version = "0.1.41", features = ["attributes", "std"] }
+tracing = { version = "0.1.41", features = ["attributes"] }
 tracing-log = "0.2"
-tracing-subscriber = { version = "0.3.20", features = ["env-filter", "fmt", "registry"] }
+tracing-subscriber = { version = "0.3.20", features = ["env-filter", "fmt", "registry"], optional = true }
 
 hex = "0.4.3"
 sha2 = { git = "https://github.com/risc0/RustCrypto-hashes", tag = "sha2-v0.10.8-risczero.0" }

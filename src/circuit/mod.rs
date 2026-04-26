@@ -1,5 +1,6 @@
 use std::{array, fmt::Debug, marker::PhantomData};
 
+#[cfg(feature = "streaming")]
 use crossbeam::channel;
 use tracing::info;
 
@@ -66,7 +67,9 @@ pub mod modes;
 pub use modes::{CircuitMode, EvaluateMode, ExecuteMode, GarbleMode};
 
 pub mod ciphertext_source;
-pub use ciphertext_source::{ChannelSource, CiphertextSource, FileSource};
+#[cfg(feature = "streaming")]
+pub use ciphertext_source::ChannelSource;
+pub use ciphertext_source::{CiphertextSource, FileSource};
 
 pub mod component_meta;
 
@@ -154,8 +157,10 @@ impl MultiCiphertextHandler<1> for Blake3AccumulatingHash {
         Blake3AccumulatingHash::finalize(self)
     }
 }
+#[cfg(feature = "streaming")]
 pub type CiphertextSender = channel::Sender<S>;
 
+#[cfg(feature = "streaming")]
 impl MultiCiphertextHandler<1> for channel::Sender<S> {
     type Result = ();
 
@@ -228,6 +233,7 @@ impl<H: GateHasher, CTH: CiphertextHandler> CircuitBuilder<GarbleMode<H, CTH>> {
     }
 }
 
+#[cfg(feature = "streaming")]
 impl<H: GateHasher> CircuitBuilder<GarbleMode<H, CiphertextSender>> {
     pub fn streaming_garbling_with_sender<I, F, O>(
         inputs: I,

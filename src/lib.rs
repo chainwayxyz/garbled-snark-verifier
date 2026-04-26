@@ -4,6 +4,7 @@ mod core;
 pub mod gadgets;
 pub mod hashers;
 mod hw;
+#[cfg(feature = "std")]
 pub mod logging;
 mod math;
 pub mod storage;
@@ -22,9 +23,9 @@ pub use crate::hashers::{
     Blake3Hasher,
     GateHasher,
     HasherKind,
-    Sha256Hasher,
     // Label commit hashers for cut-and-choose
     LabelCommitHasher,
+    Sha256Hasher,
     Sha256LabelCommitHasher,
     commit_label_with,
 };
@@ -46,6 +47,7 @@ pub use gadgets::{
     groth16_verify, groth16_verify_compressed,
 };
 pub use hw::{hardware_aes_available, warn_if_software_aes};
+#[cfg(feature = "std")]
 pub use logging::init_tracing;
 pub use math::*;
 

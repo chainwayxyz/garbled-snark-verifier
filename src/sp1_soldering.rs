@@ -1,3 +1,4 @@
+#![cfg(feature = "sp1-soldering")]
 use std::{path::PathBuf, sync::OnceLock, time::Instant};
 
 use bincode::config;

@@ -6,6 +6,7 @@
 use std::thread;
 
 use rand::Rng;
+#[cfg(feature = "parallel")]
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use tracing::info;
@@ -46,6 +47,46 @@ where
     <I as CircuitInput>::WireRepr: Send,
     I: 'static,
 {
+    fn create_instance<F>(
+        index: usize,
+        garbling_seed: &Seed,
+        config: &Config<I>,
+        live_capacity: usize,
+        builder: F,
+    ) -> GarbledInstance<GH>
+    where
+        F: Fn(&mut StreamingMode<GarbleMode<GH, Blake3AccumulatingHash>>, &I::WireRepr) -> WireId
+            + Send
+            + Sync
+            + Copy,
+    {
+        let inputs = config.input.clone();
+        let hasher = Blake3AccumulatingHash::default();
+
+        let span = tracing::info_span!("garble", instance = index);
+        let _enter = span.enter();
+
+        info!("Starting garbling of circuit (cut-and-choose)");
+
+        let res: StreamingResult<GarbleMode<GH, Blake3AccumulatingHash>, I, GarbledWire> =
+            CircuitBuilder::streaming_garbling(
+                inputs,
+                live_capacity,
+                *garbling_seed,
+                hasher,
+                builder,
+            );
+
+        // Derive gate hasher seed from garbling seed (same derivation as GarbleMode::new)
+        let gate_hasher_seed = {
+            use rand::SeedableRng;
+            use rand_chacha::ChaChaRng;
+            let mut rng = ChaChaRng::seed_from_u64(*garbling_seed);
+            GH::from_rng(&mut rng).seed().clone()
+        };
+        GarbledInstance::<GH>::from_streaming_result(res, gate_hasher_seed)
+    }
+
     /// Create garbled instances in parallel using the provided circuit builder function.
     pub fn create<F>(mut rng: impl Rng, config: Config<I>, live_capacity: usize, builder: F) -> Self
     where
@@ -58,43 +99,25 @@ where
             .map(|_| rng.r#gen())
             .collect::<Box<[Seed]>>();
 
-        // Use optimized thread pool internally
+        #[cfg(feature = "parallel")]
         let instances: Vec<_> = crate::cut_and_choose::get_optimized_pool().install(|| {
             seeds
                 .par_iter()
                 .enumerate()
                 .map(|(index, garbling_seed)| {
-                    let inputs = config.input.clone();
-                    let hasher = Blake3AccumulatingHash::default();
-
-                    let span = tracing::info_span!("garble", instance = index);
-                    let _enter = span.enter();
-
-                    info!("Starting garbling of circuit (cut-and-choose)");
-
-                    let res: StreamingResult<
-                        GarbleMode<GH, Blake3AccumulatingHash>,
-                        I,
-                        GarbledWire,
-                    > = CircuitBuilder::streaming_garbling(
-                        inputs,
-                        live_capacity,
-                        *garbling_seed,
-                        hasher,
-                        builder,
-                    );
-
-                    // Derive gate hasher seed from garbling seed (same derivation as GarbleMode::new)
-                    let gate_hasher_seed = {
-                        use rand::SeedableRng;
-                        use rand_chacha::ChaChaRng;
-                        let mut rng = ChaChaRng::seed_from_u64(*garbling_seed);
-                        GH::from_rng(&mut rng).seed().clone()
-                    };
-                    GarbledInstance::<GH>::from_streaming_result(res, gate_hasher_seed)
+                    Self::create_instance(index, garbling_seed, &config, live_capacity, builder)
                 })
                 .collect()
         });
+
+        #[cfg(not(feature = "parallel"))]
+        let instances: Vec<_> = seeds
+            .iter()
+            .enumerate()
+            .map(|(index, garbling_seed)| {
+                Self::create_instance(index, garbling_seed, &config, live_capacity, builder)
+            })
+            .collect();
 
         Self {
             stage: GarblerStage::Generating { seeds },

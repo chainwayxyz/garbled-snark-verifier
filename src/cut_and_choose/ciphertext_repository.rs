@@ -7,6 +7,7 @@ use std::{
     path::PathBuf,
 };
 
+#[cfg(feature = "streaming")]
 use crossbeam::channel;
 use tracing::error;
 
@@ -40,6 +41,7 @@ impl CiphertextSourceProvider for PathBuf {
     }
 }
 
+#[cfg(feature = "streaming")]
 impl CiphertextSourceProvider for Vec<(usize, channel::Receiver<S>)> {
     type Source = channel::Receiver<S>;
     type Error = ();

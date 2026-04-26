@@ -13,6 +13,7 @@ use std::{
     sync::{Arc, OnceLock},
 };
 
+#[cfg(feature = "parallel")]
 use rayon::{ThreadPool, ThreadPoolBuilder};
 use serde::{Deserialize, Serialize};
 
@@ -151,16 +152,19 @@ impl<I: CircuitInput> Config<I> {
     }
 }
 
+#[cfg(feature = "parallel")]
 static OPTIMIZED_POOL: OnceLock<Arc<ThreadPool>> = OnceLock::new();
 
 /// Get the singleton optimized thread pool, creating it if necessary.
 /// This is for internal use only - not exposed in the public API.
+#[cfg(feature = "parallel")]
 fn get_optimized_pool() -> &'static Arc<ThreadPool> {
     OPTIMIZED_POOL.get_or_init(|| Arc::new(build_pinned_pool()))
 }
 
 /// Build a thread pool with threads pinned to specific CPU cores.
 /// This reduces thread migrations and can improve performance for CPU-intensive tasks.
+#[cfg(feature = "parallel")]
 fn build_pinned_pool() -> ThreadPool {
     ThreadPoolBuilder::new()
         .build()

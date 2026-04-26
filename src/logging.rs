@@ -1,6 +1,9 @@
+#[cfg(feature = "std")]
 use std::sync::OnceLock;
 
+#[cfg(feature = "std")]
 use tracing_log::LogTracer;
+#[cfg(feature = "std")]
 use tracing_subscriber::{
     EnvFilter,
     fmt::{self, time::SystemTime},
@@ -8,9 +11,11 @@ use tracing_subscriber::{
     util::SubscriberInitExt,
 };
 
+#[cfg(feature = "std")]
 static INSTALL_GUARD: OnceLock<()> = OnceLock::new();
 
 /// Initialize global tracing subscriber with env-based filtering and thread scopes.
+#[cfg(feature = "std")]
 pub fn init_tracing() {
     INSTALL_GUARD.get_or_init(|| {
         if LogTracer::init().is_err() {

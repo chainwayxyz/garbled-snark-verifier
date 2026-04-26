@@ -4,6 +4,7 @@ use std::{
     path::Path,
 };
 
+#[cfg(feature = "streaming")]
 use crossbeam::channel;
 use tracing::error;
 
@@ -21,8 +22,10 @@ pub trait CiphertextSource: Send {
 }
 
 /// Channel-based source to preserve backward compatibility.
+#[cfg(feature = "streaming")]
 pub type ChannelSource = channel::Receiver<S>;
 
+#[cfg(feature = "streaming")]
 impl CiphertextSource for ChannelSource {
     type Result = ();
 

@@ -101,7 +101,6 @@ impl<H: hashers::GateHasher, CTH: CiphertextHandler> GarbleMode<H, CTH> {
             gate_hasher,
         }
     }
-        
 
     /// Get the hasher seed for inclusion in commitment
     pub fn gate_hasher_seed(&self) -> &H::Seed {

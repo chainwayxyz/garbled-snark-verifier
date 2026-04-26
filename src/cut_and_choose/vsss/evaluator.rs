@@ -5,6 +5,7 @@
 
 use itertools::*;
 use rand::Rng;
+#[cfg(feature = "parallel")]
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use tracing::{error, info};
@@ -118,6 +119,7 @@ where
         info!("Evaluator: Starting commit verification...");
 
         // Verifying the polynomials is computationally intensive, so we parallelize it
+        #[cfg(feature = "parallel")]
         crate::cut_and_choose::get_optimized_pool().install(|| {
             polynomial_commits
                 .iter()
@@ -130,6 +132,18 @@ where
                         .expect("Share commit verification failed");
                 })
         });
+
+        #[cfg(not(feature = "parallel"))]
+        {
+            polynomial_commits
+                .iter()
+                .zip(share_commits.iter())
+                .for_each(|(polynomial_commits, share_commits)| {
+                    share_commits
+                        .verify(polynomial_commits)
+                        .expect("Share commit verification failed");
+                });
+        }
 
         assert!(
             config.finalized_count() <= config.total,
@@ -156,6 +170,118 @@ where
             config,
             nonce: S::from_u128(rng.r#gen()),
             regarbled: false,
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn check_instance_vsss<CSourceProvider, CHandlerProvider, F>(
+        index: usize,
+        first_commit: &CommitPhaseOne<GH, LH>,
+        finalized_indexes: &[usize],
+        ciphertext_sources_provider: &CSourceProvider,
+        ciphertext_handler_provider: &CHandlerProvider,
+        open_instance_data: &[OpenVsssInstance],
+        inputs: &I,
+        live_capacity: usize,
+        builder: F,
+        garbling_table_commits: &[[u8; 32]],
+        wide_label_lookups: &[(usize, InstanceWideLabelLookup)],
+    ) -> Result<(), ()>
+    where
+        CSourceProvider: CiphertextSourceProvider + Send + Sync,
+        CHandlerProvider: CiphertextHandlerProvider + Send + Sync,
+        CHandlerProvider::Handler: 'static,
+        <CHandlerProvider::Handler as CiphertextHandler>::Result: 'static + Into<CiphertextCommit>,
+        F: Fn(&mut StreamingMode<GarbleMode<GH, Blake3AccumulatingHash>>, &I::WireRepr) -> WireId
+            + Send
+            + Sync
+            + Copy,
+    {
+        if finalized_indexes.contains(&index) {
+            let mut source = match ciphertext_sources_provider.source_for(index) {
+                Ok(source) => source,
+                Err(err) => {
+                    error!(index, ?err, "failed to get ciphertext source");
+                    return Err(());
+                }
+            };
+
+            let mut handler = match ciphertext_handler_provider.handler_for(index) {
+                Ok(sink) => sink,
+                Err(err) => {
+                    error!(index, ?err, "failed to create ciphertext sink");
+                    return Err(());
+                }
+            };
+
+            while let Some(s) = source.recv() {
+                handler.handle(s);
+            }
+
+            let computed_commit: CiphertextCommit = handler.finalize().into();
+
+            if computed_commit != first_commit.ciphertext_hash() {
+                error!("ciphertext corrupted");
+                return Err(());
+            }
+
+            let wide_label_lookup = wide_label_lookups
+                .iter()
+                .find(|x| x.0 == index)
+                .unwrap()
+                .1
+                .clone();
+            let tables_hash = GarbledWideLabelTable::aggregate_hash(&wide_label_lookup);
+            if tables_hash != garbling_table_commits[index] {
+                error!("wide label table corrupted");
+                return Err(());
+            }
+
+            Ok(())
+        } else {
+            let Some(info) = open_instance_data.iter().find(|x| x.index == index) else {
+                error!("failed to find seed");
+                return Err(());
+            };
+            let garbling_seed = info.seed;
+
+            let inputs = inputs.clone();
+            let hasher = Blake3AccumulatingHash::default();
+
+            let span = tracing::info_span!("regarble", instance = index);
+            let _enter = span.enter();
+
+            info!("Starting regarbling of circuit (cut-and-choose)");
+
+            let res: StreamingResult<GarbleMode<GH, Blake3AccumulatingHash>, I, GarbledWire> =
+                CircuitBuilder::streaming_garbling(
+                    inputs.clone(),
+                    live_capacity,
+                    garbling_seed,
+                    hasher,
+                    builder,
+                );
+
+            let instance = GarbledInstance::from_streaming_result(
+                res,
+                first_commit.gate_hasher_seed().clone(),
+            );
+            let wide_labels = info.shares.iter().map(|x| x.0).collect_vec();
+            let tables =
+                GarbledWideLabelTable::build_all(&wide_labels, &instance.input_wire_values);
+            let tables_hash = GarbledWideLabelTable::aggregate_hash(&tables);
+            if tables_hash != garbling_table_commits[index] {
+                error!("regarbling failed, wide label table hash not equal");
+                return Err(());
+            }
+
+            let regarbling_first_commit = CommitPhaseOne::<GH, LH>::from_instance(&instance);
+            if &regarbling_first_commit != first_commit {
+                error!("regarbling failed, first commit not equal");
+                return Err(());
+            }
+
+            Ok(())
         }
     }
 
@@ -209,7 +335,8 @@ where
 
         info!("Evaluator: running share verification and regarbling in parallel...");
 
-        // Run share commit verification AND regarbling in parallel using rayon::join
+        // Run share commit verification AND regarbling
+        #[cfg(feature = "parallel")]
         let (share_verify_result, regarble_result) = crate::cut_and_choose::get_optimized_pool()
             .install(|| {
                 rayon::join(
@@ -236,114 +363,67 @@ where
                     || {
                         iter.par_bridge()
                             .map(|(index, first_commit)| {
-                                if finalized_indexes.contains(&index) {
-                                    let mut source = match ciphertext_sources_provider
-                                        .source_for(index)
-                                    {
-                                        Ok(source) => source,
-                                        Err(err) => {
-                                            error!(index, ?err, "failed to get ciphertext source");
-                                            return Err(());
-                                        }
-                                    };
-
-                                    let mut handler = match ciphertext_handler_provider
-                                        .handler_for(index)
-                                    {
-                                        Ok(sink) => sink,
-                                        Err(err) => {
-                                            error!(index, ?err, "failed to create ciphertext sink");
-                                            return Err(());
-                                        }
-                                    };
-
-                                    while let Some(s) = source.recv() {
-                                        handler.handle(s);
-                                    }
-
-                                    let computed_commit: CiphertextCommit =
-                                        handler.finalize().into();
-
-                                    if computed_commit != first_commit.ciphertext_hash() {
-                                        error!("ciphertext corrupted");
-                                        return Err(());
-                                    }
-
-                                    let wide_label_lookup = wide_label_lookups
-                                        .iter()
-                                        .find(|x| x.0 == index)
-                                        .unwrap()
-                                        .1
-                                        .clone();
-                                    let tables_hash =
-                                        GarbledWideLabelTable::aggregate_hash(&wide_label_lookup);
-                                    if tables_hash != garbling_table_commits[index] {
-                                        error!("wide label table corrupted");
-                                        return Err(());
-                                    }
-
-                                    Ok(())
-                                } else {
-                                    let Some(info) =
-                                        open_instance_data.iter().find(|x| x.index == index)
-                                    else {
-                                        error!("failed to find seed");
-                                        return Err(());
-                                    };
-                                    let garbling_seed = info.seed;
-
-                                    let inputs = inputs.clone();
-                                    let hasher = Blake3AccumulatingHash::default();
-
-                                    let span = tracing::info_span!("regarble", instance = index);
-                                    let _enter = span.enter();
-
-                                    info!("Starting regarbling of circuit (cut-and-choose)");
-
-                                    let res: StreamingResult<
-                                        GarbleMode<GH, Blake3AccumulatingHash>,
-                                        I,
-                                        GarbledWire,
-                                    > = CircuitBuilder::streaming_garbling(
-                                        inputs.clone(),
-                                        live_capacity,
-                                        garbling_seed,
-                                        hasher,
-                                        builder,
-                                    );
-
-                                    let instance = GarbledInstance::from_streaming_result(
-                                        res,
-                                        first_commit.gate_hasher_seed().clone(),
-                                    );
-                                    let wide_labels = info.shares.iter().map(|x| x.0).collect_vec();
-                                    let tables = GarbledWideLabelTable::build_all(
-                                        &wide_labels,
-                                        &instance.input_wire_values,
-                                    );
-                                    let tables_hash =
-                                        GarbledWideLabelTable::aggregate_hash(&tables);
-                                    if tables_hash != garbling_table_commits[index] {
-                                        error!(
-                                            "regarbling failed, wide label table hash not equal"
-                                        );
-                                        return Err(());
-                                    }
-
-                                    let regarbling_first_commit =
-                                        CommitPhaseOne::<GH, LH>::from_instance(&instance);
-                                    if &regarbling_first_commit != first_commit {
-                                        error!("regarbling failed, first commit not equal");
-                                        return Err(());
-                                    }
-
-                                    Ok(())
-                                }
+                                Self::check_instance_vsss(
+                                    index,
+                                    first_commit,
+                                    finalized_indexes,
+                                    ciphertext_sources_provider,
+                                    ciphertext_handler_provider,
+                                    open_instance_data,
+                                    &inputs,
+                                    live_capacity,
+                                    builder,
+                                    garbling_table_commits,
+                                    wide_label_lookups,
+                                )
                             })
                             .collect::<Result<Vec<()>, ()>>()
                     },
                 )
             });
+
+        #[cfg(not(feature = "parallel"))]
+        let (share_verify_result, regarble_result) = {
+            // Task 1: Verify share commits (secp256k1)
+            info!("Evaluator: verifying share commits...");
+            let share_result =
+                share_commits
+                    .iter()
+                    .enumerate()
+                    .try_for_each(|(i, share_commit)| {
+                        let shares = open_instance_data
+                            .iter()
+                            .map(|x| (x.index, x.shares[i].0))
+                            .collect_vec();
+
+                        share_commit
+                            .from_canonical()
+                            .verify_shares(&secp, &shares)
+                            .map_err(|_| ())
+                    });
+            info!("Evaluator: finished verifying share commits...");
+
+            // Task 2: Regarbling and ciphertext verification
+            let regarble_result = iter
+                .map(|(index, first_commit)| {
+                    Self::check_instance_vsss(
+                        index,
+                        first_commit,
+                        finalized_indexes,
+                        ciphertext_sources_provider,
+                        ciphertext_handler_provider,
+                        open_instance_data,
+                        &inputs,
+                        live_capacity,
+                        builder,
+                        garbling_table_commits,
+                        wide_label_lookups,
+                    )
+                })
+                .collect::<Result<Vec<()>, ()>>();
+
+            (share_result, regarble_result)
+        };
 
         // Check both results
         share_verify_result.map_err(|_| {
@@ -363,6 +443,111 @@ where
     GH: GateHasher,
     LH: LabelCommitHasher,
 {
+    fn evaluate_instance_vsss<E, F, CR>(
+        index: usize,
+        eval_input: E,
+        commit: &CommitPhaseOne<GH, LH>,
+        ciphertext_repo: &CR,
+        capacity: usize,
+        builder: F,
+    ) -> Result<(usize, EvaluatedWire), ConsistencyError<LH>>
+    where
+        CR: 'static + CiphertextSourceProvider + Sync,
+        <CR::Source as CiphertextSource>::Result: Into<CiphertextCommit>,
+        E: CircuitInput + Send + EncodeInput<EvaluateMode<GH, CR::Source>>,
+        F: Fn(&mut StreamingMode<EvaluateMode<GH, CR::Source>>, &E::WireRepr) -> WireId
+            + Send
+            + Sync
+            + Copy,
+    {
+        let expected_input_commits = commit.input_commitments();
+
+        let source = match ciphertext_repo.source_for(index) {
+            Ok(src) => src,
+            Err(_) => {
+                return Err(ConsistencyError::MissingCiphertextHash(index));
+            }
+        };
+
+        let _span = tracing::info_span!("evaluate", instance = index).entered();
+
+        let gate_hasher = GH::from_seed(commit.gate_hasher_seed().clone());
+        let result = CircuitBuilder::<EvaluateMode<GH, CR::Source>>::streaming_evaluation::<
+            _,
+            _,
+            EvaluatedWire,
+        >(
+            eval_input,
+            capacity,
+            commit.true_constant(),
+            commit.false_constant(),
+            gate_hasher,
+            source,
+            builder,
+        );
+
+        if expected_input_commits.len() != result.input_wire_values.len() {
+            return Err(ConsistencyError::InputLabelsCountMismatch {
+                index,
+                expected: expected_input_commits.len(),
+                actual: result.input_wire_values.len(),
+            });
+        }
+
+        for (label_index, (expected_commit, evaluated_wire)) in expected_input_commits
+            .iter()
+            .zip(result.input_wire_values)
+            .enumerate()
+        {
+            let expected_hash = expected_commit.commit_for_value(evaluated_wire.value);
+            let actual_hash = commit_label_with::<LH>(evaluated_wire.active_label);
+
+            if actual_hash != expected_hash {
+                let mut actual_commit = expected_commit.clone();
+
+                if evaluated_wire.value {
+                    actual_commit.commit_true = actual_hash;
+                } else {
+                    actual_commit.commit_false = actual_hash;
+                }
+
+                return Err(ConsistencyError::InputLabelsMismatch {
+                    index,
+                    label_index,
+                    expected: expected_commit.clone(),
+                    actual: actual_commit,
+                });
+            }
+        }
+
+        let new_ciphertext_commit: CiphertextCommit = result.ciphertext_handler_result.into();
+        if new_ciphertext_commit != commit.ciphertext_hash() {
+            return Err(ConsistencyError::CiphertextMismatch {
+                index,
+                expected: commit.ciphertext_hash(),
+                actual: new_ciphertext_commit,
+            });
+        }
+
+        let output_hash = commit_label_with::<LH>(result.output_value.active_label);
+
+        let expected_output_hash = if result.output_value.value {
+            commit.output_commit_true()
+        } else {
+            commit.output_commit_false()
+        };
+
+        if output_hash != expected_output_hash {
+            return Err(ConsistencyError::OutputLabelMismatch {
+                index,
+                expected: expected_output_hash,
+                actual: output_hash,
+            });
+        }
+
+        Ok((index, result.output_value))
+    }
+
     /// Evaluate all finalized instances from saved ciphertext files.
     /// Returns `(index, EvaluatedWire)` pairs.
     pub fn evaluate_from<E, F, CR>(
@@ -383,107 +568,50 @@ where
     {
         let commits = self.stage.get_commit_if_ready(self.regarbled).unwrap();
 
-        crate::cut_and_choose::get_optimized_pool().install(|| {
+        #[cfg(feature = "parallel")]
+        {
+            crate::cut_and_choose::get_optimized_pool().install(|| {
+                input_cases
+                    .into_par_iter()
+                    .map(|case| {
+                        let EvaluatorCaseInput {
+                            index,
+                            input: eval_input,
+                        } = case;
+                        let commit = &commits[index];
+                        Self::evaluate_instance_vsss(
+                            index,
+                            eval_input,
+                            commit,
+                            ciphertext_repo,
+                            capacity,
+                            builder,
+                        )
+                    })
+                    .collect()
+            })
+        }
+
+        #[cfg(not(feature = "parallel"))]
+        {
             input_cases
-                .into_par_iter()
+                .into_iter()
                 .map(|case| {
                     let EvaluatorCaseInput {
                         index,
                         input: eval_input,
                     } = case;
-
                     let commit = &commits[index];
-
-                    let expected_input_commits = commit.input_commitments();
-
-                    let source = match ciphertext_repo.source_for(index) {
-                        Ok(src) => src,
-                        Err(_) => {
-                            return Err(ConsistencyError::MissingCiphertextHash(index));
-                        }
-                    };
-
-                    let _span = tracing::info_span!("evaluate", instance = index).entered();
-
-                    let gate_hasher = GH::from_seed(commit.gate_hasher_seed().clone());
-                    let result =
-                        CircuitBuilder::<EvaluateMode<GH, CR::Source>>::streaming_evaluation::<
-                            _,
-                            _,
-                            EvaluatedWire,
-                        >(
-                            eval_input,
-                            capacity,
-                            commit.true_constant(),
-                            commit.false_constant(),
-                            gate_hasher,
-                            source,
-                            builder,
-                        );
-
-                    if expected_input_commits.len() != result.input_wire_values.len() {
-                        return Err(ConsistencyError::InputLabelsCountMismatch {
-                            index,
-                            expected: expected_input_commits.len(),
-                            actual: result.input_wire_values.len(),
-                        });
-                    }
-
-                    for (label_index, (expected_commit, evaluated_wire)) in expected_input_commits
-                        .iter()
-                        .zip(result.input_wire_values)
-                        .enumerate()
-                    {
-                        let expected_hash = expected_commit.commit_for_value(evaluated_wire.value);
-                        let actual_hash = commit_label_with::<LH>(evaluated_wire.active_label);
-
-                        if actual_hash != expected_hash {
-                            let mut actual_commit = expected_commit.clone();
-
-                            if evaluated_wire.value {
-                                actual_commit.commit_true = actual_hash;
-                            } else {
-                                actual_commit.commit_false = actual_hash;
-                            }
-
-                            return Err(ConsistencyError::InputLabelsMismatch {
-                                index,
-                                label_index,
-                                expected: expected_commit.clone(),
-                                actual: actual_commit,
-                            });
-                        }
-                    }
-
-                    let new_ciphertext_commit: CiphertextCommit =
-                        result.ciphertext_handler_result.into();
-                    if new_ciphertext_commit != commit.ciphertext_hash() {
-                        return Err(ConsistencyError::CiphertextMismatch {
-                            index,
-                            expected: commit.ciphertext_hash(),
-                            actual: new_ciphertext_commit,
-                        });
-                    }
-
-                    let output_hash = commit_label_with::<LH>(result.output_value.active_label);
-
-                    let expected_output_hash = if result.output_value.value {
-                        commit.output_commit_true()
-                    } else {
-                        commit.output_commit_false()
-                    };
-
-                    if output_hash != expected_output_hash {
-                        return Err(ConsistencyError::OutputLabelMismatch {
-                            index,
-                            expected: expected_output_hash,
-                            actual: output_hash,
-                        });
-                    }
-
-                    Ok((index, result.output_value))
+                    Self::evaluate_instance_vsss(
+                        index,
+                        eval_input,
+                        commit,
+                        ciphertext_repo,
+                        capacity,
+                        builder,
+                    )
                 })
                 .collect()
-        })
+        }
     }
 }

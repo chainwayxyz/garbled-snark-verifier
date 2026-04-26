@@ -8,6 +8,7 @@ use std::thread;
 use ark_secp256k1::Fr;
 use itertools::Itertools;
 use rand::Rng;
+#[cfg(feature = "parallel")]
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use tracing::info;
@@ -49,6 +50,50 @@ where
     <I as CircuitInput>::WireRepr: Send,
     I: 'static,
 {
+    fn create_instance_vsss<F>(
+        index: usize,
+        garbling_seed: &Seed,
+        wide_labels: &[Fr],
+        config: &Config<I>,
+        live_capacity: usize,
+        builder: F,
+    ) -> (GarbledInstance<GH>, InstanceWideLabelLookup)
+    where
+        F: Fn(&mut StreamingMode<GarbleMode<GH, Blake3AccumulatingHash>>, &I::WireRepr) -> WireId
+            + Send
+            + Sync
+            + Copy,
+    {
+        let inputs = config.input.clone();
+        let hasher = Blake3AccumulatingHash::default();
+
+        let span = tracing::info_span!("garble", instance = index);
+        let _enter = span.enter();
+
+        info!("Starting garbling of circuit (cut-and-choose)");
+
+        let res: StreamingResult<GarbleMode<GH, Blake3AccumulatingHash>, I, GarbledWire> =
+            CircuitBuilder::streaming_garbling(
+                inputs,
+                live_capacity,
+                *garbling_seed,
+                hasher,
+                builder,
+            );
+
+        // Derive gate hasher seed from garbling seed (same derivation as GarbleMode::new)
+        let gate_hasher_seed = {
+            use rand::SeedableRng;
+            use rand_chacha::ChaChaRng;
+            let mut rng = ChaChaRng::seed_from_u64(*garbling_seed);
+            GH::from_rng(&mut rng).seed().clone()
+        };
+        let instance = GarbledInstance::<GH>::from_streaming_result(res, gate_hasher_seed);
+        let tables = GarbledWideLabelTable::build_all(wide_labels, &instance.input_wire_values);
+
+        (instance, tables)
+    }
+
     /// Create garbled instances in parallel using the provided circuit builder function.
     pub fn create<F>(mut rng: impl Rng, config: Config<I>, live_capacity: usize, builder: F) -> Self
     where
@@ -94,6 +139,7 @@ where
             .collect::<Box<[Seed]>>();
 
         // Use optimized thread pool internally
+        #[cfg(feature = "parallel")]
         let ret: Vec<_> = crate::cut_and_choose::get_optimized_pool().install(|| {
             seeds
                 .iter()
@@ -102,42 +148,34 @@ where
                 .par_iter()
                 .enumerate()
                 .map(|(index, (garbling_seed, wide_labels))| {
-                    let inputs = config.input.clone();
-                    let hasher = Blake3AccumulatingHash::default();
-
-                    let span = tracing::info_span!("garble", instance = index);
-                    let _enter = span.enter();
-
-                    info!("Starting garbling of circuit (cut-and-choose)");
-
-                    let res: StreamingResult<
-                        GarbleMode<GH, Blake3AccumulatingHash>,
-                        I,
-                        GarbledWire,
-                    > = CircuitBuilder::streaming_garbling(
-                        inputs,
+                    Self::create_instance_vsss(
+                        index,
+                        garbling_seed,
+                        wide_labels,
+                        &config,
                         live_capacity,
-                        **garbling_seed,
-                        hasher,
                         builder,
-                    );
-
-                    // Derive gate hasher seed from garbling seed (same derivation as GarbleMode::new)
-                    let gate_hasher_seed = {
-                        use rand::SeedableRng;
-                        use rand_chacha::ChaChaRng;
-                        let mut rng = ChaChaRng::seed_from_u64(**garbling_seed);
-                        GH::from_rng(&mut rng).seed().clone()
-                    };
-                    let instance =
-                        GarbledInstance::<GH>::from_streaming_result(res, gate_hasher_seed);
-                    let tables =
-                        GarbledWideLabelTable::build_all(wide_labels, &instance.input_wire_values);
-
-                    (instance, tables)
+                    )
                 })
                 .collect()
         });
+
+        #[cfg(not(feature = "parallel"))]
+        let ret: Vec<_> = seeds
+            .iter()
+            .zip(instance_wide_labels.iter())
+            .enumerate()
+            .map(|(index, (garbling_seed, wide_labels))| {
+                Self::create_instance_vsss(
+                    index,
+                    garbling_seed,
+                    wide_labels,
+                    &config,
+                    live_capacity,
+                    builder,
+                )
+            })
+            .collect();
 
         let (instances, wide_label_tables): (Vec<_>, Vec<_>) = ret.into_iter().unzip();
 
@@ -167,6 +205,7 @@ where
             .map(Polynomial::from_canonical)
             .collect_vec();
 
+        #[cfg(feature = "parallel")]
         let (share_commits, polynomial_commits): (Vec<_>, Vec<_>) =
             crate::cut_and_choose::get_optimized_pool().install(|| {
                 polynomials
@@ -181,6 +220,18 @@ where
                     })
                     .unzip()
             });
+
+        #[cfg(not(feature = "parallel"))]
+        let (share_commits, polynomial_commits): (Vec<_>, Vec<_>) = polynomials
+            .iter()
+            .map(|polynomial| {
+                let share_commits = polynomial
+                    .share_commits(&secp, self.config.total)
+                    .to_canonical();
+                let polynomial_commits = polynomial.coefficient_commits(&secp).to_canonical();
+                (share_commits, polynomial_commits)
+            })
+            .unzip();
 
         let circuit_commits = self
             .instances
