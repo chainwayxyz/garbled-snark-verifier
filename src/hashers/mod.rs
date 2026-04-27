@@ -65,11 +65,12 @@ impl HashWithGate<1> for Blake3Hasher {
     fn hash_with_gate(&self, label: &[S; 1], gate_id: usize) -> [S; 1] {
         let mut result = [0u8; S_SIZE];
         let mut hasher = blake3::Hasher::new();
+        let word_size_consistent_gate_id = &(gate_id as u64).to_le_bytes();
 
         let b = label[0].to_bytes();
 
         hasher.update(&b);
-        hasher.update(&gate_id.to_le_bytes());
+        hasher.update(word_size_consistent_gate_id);
 
         let hash = hasher.finalize();
         result.copy_from_slice(&hash.as_bytes()[0..S_SIZE]);
@@ -112,8 +113,9 @@ impl HashWithGate<1> for Sha256Hasher {
     fn hash_with_gate(&self, labels: &[S; 1], gate_id: usize) -> [S; 1] {
         use sha2::Digest;
         let mut hasher = sha2::Sha256::new();
+        let word_size_consistent_gate_id = &(gate_id as u64).to_le_bytes();
         hasher.update(labels[0].to_bytes());
-        hasher.update(gate_id.to_le_bytes());
+        hasher.update(word_size_consistent_gate_id);
         let result = hasher.finalize();
 
         [S::from_bytes(result[0..S_SIZE].try_into().unwrap())]
@@ -179,7 +181,7 @@ fn hash_label_with_gate(salt: S, label: S, gate_id: usize) -> S {
 impl HashWithGate<2> for AesCcrGateHasher {
     #[inline(always)]
     fn hash_with_gate(&self, labels: &[S; 2], gate_id: usize) -> [S; 2] {
-        let tweak = S::from_u128(gate_id as u128);
+        let tweak = S::from_u128(gate_id as u128); //this is already platform independent
 
         let x0 = labels[0] ^ &tweak ^ &self.salt;
         let x1 = labels[1] ^ &tweak ^ &self.salt;
@@ -187,7 +189,7 @@ impl HashWithGate<2> for AesCcrGateHasher {
         let p0 = perm_u128(x0);
         let p1 = perm_u128(x1);
 
-        let (c0, c1) = aes_ni::aes128_encrypt2_blocks_static(p0.to_le_bytes(), p1.to_le_bytes())
+        let (c0, c1) = aes_ni::aes128_encrypt2_blocks_static(p0.to_le_bytes(), p1.to_le_bytes()) // these are also platform independent
             .expect("AES backend unavailable");
 
         let h0 = S::from_le_bytes(c0) ^ &p0;
