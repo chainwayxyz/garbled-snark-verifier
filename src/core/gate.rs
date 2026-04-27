@@ -1,9 +1,10 @@
+use serde::{Deserialize, Serialize};
 use std::fmt;
 
 pub use crate::GateType;
 use crate::{WireId, circuit::TRUE_WIRE};
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Gate {
     pub wire_a: WireId,
     pub wire_b: WireId,

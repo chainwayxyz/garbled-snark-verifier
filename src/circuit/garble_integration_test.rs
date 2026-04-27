@@ -6,7 +6,7 @@ mod tests {
     use test_log::test;
 
     use crate::{
-        Blake3Hasher, Delta, GarbleMode, GarbledWire, Gate, WireId,
+        Blake3Hasher, Delta, GarbleMode, GarbledWire, Gate, GateHasher, WireId,
         circuit::{
             CircuitBuilder, CircuitContext, CircuitInput, CircuitMode, EncodeInput, FALSE_WIRE,
             StreamingResult, TRUE_WIRE,
@@ -199,7 +199,9 @@ mod tests {
             .map(|_| GarbledWire::random(&mut rng, &delta))
             .collect();
 
-        let inputs = SimpleGarbledInputs { wires: input_wires };
+        let inputs = SimpleGarbledInputs {
+            wires: input_wires.clone(),
+        };
 
         // Create channel for garbled tables
         let (sender, receiver) = channel::unbounded();
@@ -259,5 +261,160 @@ mod tests {
 
         // Verify we have the expected non-free gates
         assert_eq!(tables.len(), 10, "Should have 10 non-free gates");
+    }
+
+    #[test]
+    fn test_large_circuit_macro() {
+        use crate::GateType;
+        use crate::circuit::modes::garble_mode::halfgates_garbling::garble_gate;
+        use circuit_component_macro::generate_commitment_from_file;
+
+        let mut rng = ChaChaRng::seed_from_u64(12345);
+        let delta = Delta::generate(&mut rng);
+
+        // adder_64.json expects 128 inputs
+        let mut input_wires = Vec::new();
+        for _ in 0..128 {
+            input_wires.push(GarbledWire::random(&mut rng, &delta).label0);
+        }
+
+        let input_wires = input_wires.as_slice();
+
+        // Must match the hasher type expected
+        let gate_hasher = Blake3Hasher::from_rng(&mut rng);
+
+        let false_wire = GarbledWire::random(&mut rng, &delta).label0;
+        let true_wire = GarbledWire::random(&mut rng, &delta).label0;
+
+        let (ciphertexts, _last_label) = generate_commitment_from_file!(
+            "OUT_DIR/adder_64.json",
+            &gate_hasher,
+            &delta,
+            false_wire,
+            true_wire,
+            input_wires
+        );
+
+        // Validate the macro outputted successfully and we have ciphertexts
+        // Since many of the 199 gates are XOR (which are free), the number of ciphertexts will be less than 199.
+        // But we know it successfully evaluated the unrolled branchless code at compile-time!
+        assert!(
+            !ciphertexts.is_empty(),
+            "Ciphertexts should not be empty for large circuit"
+        );
+    }
+
+    #[test]
+    fn test_adder_macro_equivalence() {
+        use crate::circuit::modes::garble_mode::GarbleMode;
+        use crate::circuit::modes::garble_mode::halfgates_garbling::garble_gate;
+        use crate::circuit::{
+            CircuitBuilder, CircuitInput, CircuitMode, EncodeInput, StreamingResult,
+        };
+        use crate::gadgets::bigint::{BigIntWires, add};
+        use crate::{GateType, S};
+        use circuit_component_macro::generate_commitment_from_file;
+        use crossbeam::channel;
+
+        let seed = 12345;
+        let mut rng = ChaChaRng::seed_from_u64(seed);
+
+        // Replicate GarbleMode initialization order to get matching hasher/delta/constants
+        let gate_hasher = Blake3Hasher::from_rng(&mut rng);
+        let delta = Delta::generate(&mut rng);
+        let false_wire_obj = GarbledWire::random(&mut rng, &delta);
+        let true_wire_obj = GarbledWire::random(&mut rng, &delta);
+
+        let num_bits = 64;
+        // Generate labels for 2 * 64 bits
+        let input_labels: Vec<S> = (0..num_bits * 2)
+            .map(|_| GarbledWire::random(&mut rng, &delta).label0)
+            .collect();
+
+        // 1. Macro execution (Compile-time unrolled)
+        let (macro_ciphertexts, macro_last_label) = generate_commitment_from_file!(
+            "OUT_DIR/adder_64.json",
+            &gate_hasher,
+            &delta,
+            false_wire_obj.label0,
+            true_wire_obj.label0,
+            input_labels
+        );
+
+        // 2. Runtime Streaming execution
+        struct AdderInput {
+            len: usize,
+            labels: Vec<S>,
+        }
+        impl CircuitInput for AdderInput {
+            type WireRepr = [BigIntWires; 2];
+            fn allocate(&self, mut issue: impl FnMut() -> WireId) -> Self::WireRepr {
+                [
+                    BigIntWires::new(&mut issue, self.len),
+                    BigIntWires::new(&mut issue, self.len),
+                ]
+            }
+            fn collect_wire_ids(repr: &Self::WireRepr) -> Vec<WireId> {
+                repr.iter().flat_map(|a| a.iter().copied()).collect()
+            }
+        }
+        impl<M: CircuitMode<WireValue = GarbledWire>> EncodeInput<M> for AdderInput {
+            fn encode(&self, repr: &Self::WireRepr, cache: &mut M) {
+                let mut idx = 0;
+                // Note: We use a dummy delta here because we can't access GarbleMode's private delta.
+                // However, the macro test only cares about label0 matching, and GarbleMode.feed_wire
+                // only stores label0 anyway. The actual delta used for ciphertexts is internal to GarbleMode.
+                for wires in repr {
+                    for wire in wires.iter() {
+                        let label0 = self.labels[idx];
+                        cache.feed_wire(
+                            *wire,
+                            GarbledWire {
+                                label0,
+                                label1: label0,
+                            },
+                        );
+                        idx += 1;
+                    }
+                }
+            }
+        }
+
+        let (sender, receiver) = channel::unbounded();
+        let input = AdderInput {
+            len: num_bits,
+            labels: input_labels,
+        };
+
+        let result: StreamingResult<GarbleMode<Blake3Hasher, _>, _, Vec<GarbledWire>> =
+            CircuitBuilder::streaming_garbling_with_gates(
+                input,
+                10_000,
+                seed,
+                sender,
+                |ctx, input| {
+                    let [a, b] = input;
+                    let sum = add(ctx, a, b);
+                    sum.bits
+                },
+            );
+
+        let streaming_ciphertexts: Vec<S> = receiver.iter().collect();
+        let streaming_last_label = result.output_value.last().unwrap().label0;
+
+        // Verification
+        assert_eq!(
+            macro_ciphertexts.len(),
+            streaming_ciphertexts.len(),
+            "Ciphertext count mismatch"
+        );
+        assert_eq!(
+            macro_ciphertexts, streaming_ciphertexts,
+            "Ciphertext content mismatch"
+        );
+        assert_eq!(
+            macro_last_label, streaming_last_label,
+            "Output label mismatch"
+        );
     }
 }

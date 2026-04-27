@@ -6,10 +6,12 @@ use syn::{
 
 mod gen_bn_wrapper;
 mod gen_wrapper;
+mod parse_gates;
 mod parse_sig;
 
 use gen_bn_wrapper::generate_bn_wrapper;
 use gen_wrapper::generate_wrapper;
+use parse_gates::{CommitmentMacroInput, generate_commitment_impl};
 use parse_sig::ComponentSignature;
 
 /// Procedural attribute macro for circuit component functions
@@ -149,6 +151,31 @@ pub fn bn_component(args: TokenStream, input: TokenStream) -> TokenStream {
             Ok(tokens) => tokens.into(),
             Err(err) => err.to_compile_error().into(),
         },
+        Err(err) => err.to_compile_error().into(),
+    }
+}
+
+/// Procedural macro to generate unrolled garbled circuit evaluation from a saved gates JSON file.
+///
+/// Reads a JSON file containing `StoredGates` at compile-time and generates purely sequential,
+/// branchless assignments for every gate. This provides massive LLVM optimization benefits.
+///
+/// # Arguments
+/// - `path`: A string literal representing the relative path to the JSON file from the crate's `CARGO_MANIFEST_DIR`.
+/// - `gate_hasher`: The gate hasher instance (`&H`).
+/// - `delta`: The delta instance (`&Delta`).
+/// - `false_wire`: The label for the false wire (`S`).
+/// - `true_wire`: The label for the true wire (`S`).
+/// - `input_wires`: The slice or array containing the initial wire labels (`&[S]`).
+///
+/// # Returns
+/// A tuple: `(Vec<S>, S)` containing the generated ciphertexts and the output label.
+#[proc_macro]
+pub fn generate_commitment_from_file(input: TokenStream) -> TokenStream {
+    let macro_input = parse_macro_input!(input as CommitmentMacroInput);
+
+    match generate_commitment_impl(macro_input) {
+        Ok(tokens) => tokens.into(),
         Err(err) => err.to_compile_error().into(),
     }
 }

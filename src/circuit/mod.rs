@@ -1,3 +1,4 @@
+use serde::{Deserialize, Serialize};
 use std::{array, fmt::Debug, marker::PhantomData};
 
 #[cfg(feature = "streaming")]
@@ -5,7 +6,7 @@ use crossbeam::channel;
 use tracing::info;
 
 use crate::{
-    Blake3AccumulatingHash, EvaluatedWire, GarbledWire, S, WireId,
+    Blake3AccumulatingHash, EvaluatedWire, GarbledWire, Gate, S, WireId,
     ciphertext_hasher::HASH_OUTPUT_SIZE, circuit::component_meta::ComponentMetaBuilder,
     core::gate_type::GateCount, hashers::GateHasher,
 };
@@ -107,6 +108,46 @@ pub struct StreamingResult<M: CircuitMode, I: CircuitInput, O: CircuitOutput<M>>
     pub ciphertext_handler_result: M::CiphertextAcc,
 
     pub gate_count: GateCount,
+
+    pub stored_gates: Option<Vec<Gate>>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct StoredGates {
+    pub gates: Vec<Gate>,
+    pub input_wire_ids: Vec<WireId>,
+}
+
+impl StoredGates {
+    pub fn from_streaming_result<M, I, O>(result: &StreamingResult<M, I, O>) -> Option<Self>
+    where
+        M: CircuitMode,
+        I: CircuitInput + EncodeInput<M>,
+        O: crate::circuit::CircuitOutput<M>,
+    {
+        let gates = result.stored_gates.clone()?;
+        let input_wire_ids = I::collect_wire_ids(&result.input_wires_repr);
+        Some(Self {
+            gates,
+            input_wire_ids,
+        })
+    }
+
+    /// Serializes and saves the stored gates to a JSON file.
+    pub fn save_to_json<P: AsRef<std::path::Path>>(&self, path: P) -> std::io::Result<()> {
+        let file = std::fs::File::create(path)?;
+        let writer = std::io::BufWriter::new(file);
+        serde_json::to_writer(writer, self)
+            .map_err(std::io::Error::other)
+    }
+
+    /// Loads and deserializes stored gates from a JSON file.
+    pub fn load_from_json<P: AsRef<std::path::Path>>(path: P) -> std::io::Result<Self> {
+        let file = std::fs::File::open(path)?;
+        let reader = std::io::BufReader::new(file);
+        serde_json::from_reader(reader)
+            .map_err(std::io::Error::other)
+    }
 }
 
 // Convenience helpers for garbling results
@@ -136,7 +177,31 @@ impl CircuitBuilder<ExecuteMode> {
         O::WireRepr: Debug,
         F: Fn(&mut StreamingMode<ExecuteMode>, &I::WireRepr) -> O::WireRepr,
     {
-        CircuitBuilder::run_streaming(inputs, ExecuteMode::with_capacity(live_wires_capacity), f)
+        CircuitBuilder::run_streaming_internal(
+            inputs,
+            ExecuteMode::with_capacity(live_wires_capacity),
+            false,
+            f,
+        )
+    }
+
+    pub fn streaming_execute_with_gates<I, F, O>(
+        inputs: I,
+        live_wires_capacity: usize,
+        f: F,
+    ) -> StreamingResult<ExecuteMode, I, O>
+    where
+        I: CircuitInput + EncodeInput<ExecuteMode>,
+        O: CircuitOutput<ExecuteMode>,
+        O::WireRepr: Debug,
+        F: Fn(&mut StreamingMode<ExecuteMode>, &I::WireRepr) -> O::WireRepr,
+    {
+        CircuitBuilder::run_streaming_internal(
+            inputs,
+            ExecuteMode::with_capacity(live_wires_capacity),
+            true,
+            f,
+        )
     }
 }
 
@@ -225,9 +290,31 @@ impl<H: GateHasher, CTH: CiphertextHandler> CircuitBuilder<GarbleMode<H, CTH>> {
         O::WireRepr: Debug,
         F: Fn(&mut StreamingMode<GarbleMode<H, CTH>>, &I::WireRepr) -> O::WireRepr,
     {
-        CircuitBuilder::run_streaming(
+        CircuitBuilder::run_streaming_internal(
             inputs,
             GarbleMode::new(live_wires_capacity, seed, handler),
+            false,
+            f,
+        )
+    }
+
+    pub fn streaming_garbling_with_gates<I, F, O>(
+        inputs: I,
+        live_wires_capacity: usize,
+        seed: u64,
+        handler: CTH,
+        f: F,
+    ) -> StreamingResult<GarbleMode<H, CTH>, I, O>
+    where
+        I: CircuitInput + EncodeInput<GarbleMode<H, CTH>>,
+        O: CircuitOutput<GarbleMode<H, CTH>>,
+        O::WireRepr: Debug,
+        F: Fn(&mut StreamingMode<GarbleMode<H, CTH>>, &I::WireRepr) -> O::WireRepr,
+    {
+        CircuitBuilder::run_streaming_internal(
+            inputs,
+            GarbleMode::new(live_wires_capacity, seed, handler),
+            true,
             f,
         )
     }
@@ -250,6 +337,22 @@ impl<H: GateHasher> CircuitBuilder<GarbleMode<H, CiphertextSender>> {
     {
         Self::streaming_garbling(inputs, live_wires_capacity, seed, output_sender, f)
     }
+
+    pub fn streaming_garbling_with_sender_with_gates<I, F, O>(
+        inputs: I,
+        live_wires_capacity: usize,
+        seed: u64,
+        output_sender: channel::Sender<S>,
+        f: F,
+    ) -> StreamingResult<GarbleMode<H, CiphertextSender>, I, O>
+    where
+        I: CircuitInput + EncodeInput<GarbleMode<H, CiphertextSender>>,
+        O: CircuitOutput<GarbleMode<H, CiphertextSender>>,
+        O::WireRepr: Debug,
+        F: Fn(&mut StreamingMode<GarbleMode<H, CiphertextSender>>, &I::WireRepr) -> O::WireRepr,
+    {
+        Self::streaming_garbling_with_gates(inputs, live_wires_capacity, seed, output_sender, f)
+    }
 }
 
 impl<H: GateHasher, SRC: CiphertextSource> CircuitBuilder<EvaluateMode<H, SRC>> {
@@ -268,7 +371,7 @@ impl<H: GateHasher, SRC: CiphertextSource> CircuitBuilder<EvaluateMode<H, SRC>> 
         O::WireRepr: Debug,
         F: Fn(&mut StreamingMode<EvaluateMode<H, SRC>>, &I::WireRepr) -> O::WireRepr,
     {
-        CircuitBuilder::run_streaming(
+        CircuitBuilder::run_streaming_internal(
             inputs,
             EvaluateMode::new(
                 gate_hasher,
@@ -277,6 +380,36 @@ impl<H: GateHasher, SRC: CiphertextSource> CircuitBuilder<EvaluateMode<H, SRC>> 
                 S::from_u128(false_wire),
                 source,
             ),
+            false,
+            f,
+        )
+    }
+
+    pub fn streaming_evaluation_with_gates<I, F, O>(
+        inputs: I,
+        live_wires_capacity: usize,
+        true_wire: u128,
+        false_wire: u128,
+        gate_hasher: H,
+        source: SRC,
+        f: F,
+    ) -> StreamingResult<EvaluateMode<H, SRC>, I, O>
+    where
+        I: CircuitInput + EncodeInput<EvaluateMode<H, SRC>>,
+        O: CircuitOutput<EvaluateMode<H, SRC>>,
+        O::WireRepr: Debug,
+        F: Fn(&mut StreamingMode<EvaluateMode<H, SRC>>, &I::WireRepr) -> O::WireRepr,
+    {
+        CircuitBuilder::run_streaming_internal(
+            inputs,
+            EvaluateMode::new(
+                gate_hasher,
+                live_wires_capacity,
+                S::from_u128(true_wire),
+                S::from_u128(false_wire),
+                source,
+            ),
+            true,
             f,
         )
     }
@@ -284,6 +417,31 @@ impl<H: GateHasher, SRC: CiphertextSource> CircuitBuilder<EvaluateMode<H, SRC>> 
 
 impl<M: CircuitMode> CircuitBuilder<M> {
     pub fn run_streaming<I, F, O>(inputs: I, mode: M, f: F) -> StreamingResult<M, I, O>
+    where
+        I: CircuitInput + EncodeInput<M>,
+        O: CircuitOutput<M>,
+        O::WireRepr: Debug,
+        F: Fn(&mut StreamingMode<M>, &I::WireRepr) -> O::WireRepr,
+    {
+        Self::run_streaming_internal(inputs, mode, false, f)
+    }
+
+    pub fn run_streaming_with_gates<I, F, O>(inputs: I, mode: M, f: F) -> StreamingResult<M, I, O>
+    where
+        I: CircuitInput + EncodeInput<M>,
+        O: CircuitOutput<M>,
+        O::WireRepr: Debug,
+        F: Fn(&mut StreamingMode<M>, &I::WireRepr) -> O::WireRepr,
+    {
+        Self::run_streaming_internal(inputs, mode, true, f)
+    }
+
+    fn run_streaming_internal<I, F, O>(
+        inputs: I,
+        mode: M,
+        store_gates: bool,
+        f: F,
+    ) -> StreamingResult<M, I, O>
     where
         I: CircuitInput + EncodeInput<M>,
         O: CircuitOutput<M>,
@@ -298,7 +456,7 @@ impl<M: CircuitMode> CircuitBuilder<M> {
         let root_meta_output_wires = root_meta_output.to_wires_vec();
 
         let (mut ctx, allocated_inputs) =
-            root_meta.to_root_ctx(mode, &inputs, &root_meta_output_wires);
+            root_meta.to_root_ctx(mode, &inputs, &root_meta_output_wires, store_gates);
 
         let input_values = I::collect_wire_ids(&allocated_inputs)
             .into_iter()
@@ -310,13 +468,19 @@ impl<M: CircuitMode> CircuitBuilder<M> {
 
         let true_wire_constant = ctx.lookup_wire(TRUE_WIRE).unwrap();
         let false_wire_constant = ctx.lookup_wire(FALSE_WIRE).unwrap();
-        let (ciphertext_handler_result, gate_count, output) = match ctx {
+        let (ciphertext_handler_result, gate_count, stored_gates, output) = match ctx {
             StreamingMode::ExecutionPass(mut ctx) => {
                 info!("gate count: {}", ctx.gate_count);
                 let output = O::decode(output_repr, &mut ctx.mode);
                 let gate_count = ctx.gate_count.clone();
+                let stored_gates = ctx.stored_gates.take();
 
-                (ctx.finalize_ciphertext_accumulator(), gate_count, output)
+                (
+                    ctx.finalize_ciphertext_accumulator(),
+                    gate_count,
+                    stored_gates,
+                    output,
+                )
             }
             _ => unreachable!(),
         };
@@ -330,6 +494,7 @@ impl<M: CircuitMode> CircuitBuilder<M> {
             input_wires_repr: allocated_inputs,
             input_wire_values: input_values,
             gate_count,
+            stored_gates,
         }
     }
 }

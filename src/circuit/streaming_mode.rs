@@ -22,6 +22,7 @@ pub struct StreamingContext<M: CircuitMode> {
     pub stack: Vec<ComponentMetaInstance>,
     pub templates: ComponentTemplatePool,
     pub gate_count: GateCount,
+    pub stored_gates: Option<Vec<Gate>>,
 }
 
 /// Two-phase streaming execution: metadata collection (fanout totals) and execution
@@ -29,7 +30,7 @@ pub struct StreamingContext<M: CircuitMode> {
 #[derive(Debug)]
 pub enum StreamingMode<M: CircuitMode> {
     MetadataPass(ComponentMetaBuilder),
-    ExecutionPass(StreamingContext<M>),
+    ExecutionPass(Box<StreamingContext<M>>),
 }
 
 impl<M: CircuitMode> StreamingMode<M> {
@@ -81,6 +82,7 @@ impl<M: CircuitMode> StreamingMode<M> {
         mode: M,
         input: &I,
         meta_output_wires: &[WireId],
+        store_gates: bool,
     ) -> (Self, I::WireRepr) {
         if let StreamingMode::MetadataPass(meta) = self {
             let meta = meta.build(meta_output_wires);
@@ -97,7 +99,7 @@ impl<M: CircuitMode> StreamingMode<M> {
             // Extend the credit stack with input remaining-use counters.
             instance.credits_stack.extend_from_slice(&input_credits);
 
-            let mut ctx = StreamingMode::ExecutionPass(StreamingContext {
+            let mut ctx = StreamingMode::ExecutionPass(Box::new(StreamingContext {
                 mode,
                 stack: vec![instance],
                 templates: {
@@ -106,7 +108,8 @@ impl<M: CircuitMode> StreamingMode<M> {
                     pool
                 },
                 gate_count: GateCount::default(),
-            });
+                stored_gates: if store_gates { Some(Vec::new()) } else { None },
+            }));
 
             let input_repr = input.allocate(|| ctx.issue_wire());
             input.encode(&input_repr, ctx.get_mut_mode().unwrap());
@@ -138,6 +141,10 @@ impl<M: CircuitMode> CircuitContext for StreamingMode<M> {
             }
             StreamingMode::ExecutionPass(ctx) => {
                 ctx.gate_count.handle(gate.gate_type);
+
+                if let Some(gates) = &mut ctx.stored_gates {
+                    gates.push(gate.clone());
+                }
 
                 assert_ne!(gate.wire_a, WireId::UNREACHABLE);
                 assert_ne!(gate.wire_b, WireId::UNREACHABLE);
@@ -184,7 +191,7 @@ impl<M: CircuitMode> CircuitContext for StreamingMode<M> {
 
                 let StreamingContext {
                     mode, templates, ..
-                } = ctx;
+                } = ctx.as_mut();
 
                 let template = templates.get_or_insert_with(key, || {
                     // Calculate arity from the real input structure
