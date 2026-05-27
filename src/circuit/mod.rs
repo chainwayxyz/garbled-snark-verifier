@@ -137,16 +137,14 @@ impl StoredGates {
     pub fn save_to_json<P: AsRef<std::path::Path>>(&self, path: P) -> std::io::Result<()> {
         let file = std::fs::File::create(path)?;
         let writer = std::io::BufWriter::new(file);
-        serde_json::to_writer(writer, self)
-            .map_err(std::io::Error::other)
+        serde_json::to_writer(writer, self).map_err(std::io::Error::other)
     }
 
     /// Loads and deserializes stored gates from a JSON file.
     pub fn load_from_json<P: AsRef<std::path::Path>>(path: P) -> std::io::Result<Self> {
         let file = std::fs::File::open(path)?;
         let reader = std::io::BufReader::new(file);
-        serde_json::from_reader(reader)
-            .map_err(std::io::Error::other)
+        serde_json::from_reader(reader).map_err(std::io::Error::other)
     }
 }
 

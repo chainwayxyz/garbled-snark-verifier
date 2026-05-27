@@ -236,6 +236,13 @@ where
         }
         result
     }
+
+    /// Construct a polynomial from a list of point values evaluated at the
+    /// consecutive integer indices `0, 1, ..., degree`. The length of `points`
+    /// determines the degree (`degree = points.len() - 1`).
+    pub fn new(points: Vec<T>) -> Self {
+        Self(points)
+    }
 }
 
 impl Polynomial<Fr> {
@@ -321,6 +328,19 @@ impl ShareCommits<Projective> {
             }
         }
         Ok(())
+    }
+
+    /// Verify that this [`ShareCommits`] is internally self-consistent, given
+    /// the degree of the underlying polynomial.
+    ///
+    /// The first `degree + 1` committed points are treated as the polynomial
+    /// coefficient commitments (`G * coeff[i]` for `i in 0..=degree`). A
+    /// [`PolynomialCommits`] is constructed from them and used to verify that
+    /// the remaining committed points are consistent via Lagrange interpolation.
+    pub fn verify_self_consistence(&self, degree: usize) -> Result<(), String> {
+        let poly = Polynomial::new(self.0[..=degree].to_vec());
+        let poly_commits = PolynomialCommits(poly);
+        self.verify(&poly_commits)
     }
 
     pub fn verify_shares(&self, secp: &Secp256k1, shares: &[(usize, Fr)]) -> Result<(), String> {
